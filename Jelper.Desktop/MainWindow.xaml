@@ -1,0 +1,264 @@
+<Window x:Class="Jelper.Desktop.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="Jelper Image Helper"
+        Height="720"
+        Width="1100"
+        MinHeight="640"
+        MinWidth="960"
+        Background="#0D0F14"
+        Foreground="#F5F5F5">
+    <Window.Resources>
+        <SolidColorBrush x:Key="CardBrush" Color="#181C23" />
+        <SolidColorBrush x:Key="AccentBrush" Color="#3EA6FF" />
+        <SolidColorBrush x:Key="BorderBrushColor" Color="#2A2F3A" />
+
+        <Style TargetType="Button">
+            <Setter Property="Background" Value="#232833" />
+            <Setter Property="Foreground" Value="#F5F5F5" />
+            <Setter Property="BorderBrush" Value="#343B48" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="12,6" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border CornerRadius="6"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#2E3543" />
+                </Trigger>
+                <Trigger Property="IsPressed" Value="True">
+                    <Setter Property="Background" Value="#1F242E" />
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Opacity" Value="0.5" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style TargetType="TextBox">
+            <Setter Property="Background" Value="#1C212B" />
+            <Setter Property="Foreground" Value="#F5F5F5" />
+            <Setter Property="BorderBrush" Value="#2E3543" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="8,4" />
+        </Style>
+
+        <Style TargetType="ComboBox">
+            <Setter Property="Background" Value="#1C212B" />
+            <Setter Property="Foreground" Value="#F5F5F5" />
+        </Style>
+
+        <Style x:Key="IconActionButtonStyle" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Padding" Value="16" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border CornerRadius="10"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid x:Name="LayoutRoot" Margin="24">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <StackPanel>
+                <TextBlock Text="Jelper — массовая обработка изображений" FontSize="24" FontWeight="Bold" />
+                <TextBlock Text="Выберите папку с картинками, затем используйте нужный инструмент" Margin="0,6,0,0" Foreground="#B0B4C1" />
+            </StackPanel>
+
+            <Border Grid.Row="1" Background="{StaticResource CardBrush}" CornerRadius="10" Padding="16" Margin="0,18,0,0" BorderBrush="{StaticResource BorderBrushColor}" BorderThickness="1">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="Папка с файлами" FontWeight="SemiBold" />
+                        <TextBox x:Name="ImagesFolderTextBox" Margin="0,6,0,0" MinWidth="320" />
+                    </StackPanel>
+                    <Button x:Name="BrowseFolderButton" Grid.Column="1" Content="Выбрать папку" Margin="16,18,0,0" Click="BrowseFolderButton_OnClick" />
+                </Grid>
+            </Border>
+
+            <Border Grid.Row="2" Background="{StaticResource CardBrush}" CornerRadius="10" Padding="16" Margin="0,20,0,0" BorderBrush="{StaticResource BorderBrushColor}" BorderThickness="1">
+                <UniformGrid x:Name="ActionsPanel" Columns="4" Rows="1" Margin="0,4,0,0">
+                    <Button Style="{StaticResource IconActionButtonStyle}" Tag="Convert" Click="ActionShortcut_OnClick" ToolTip="Конвертация WEBP в PNG">
+                        <StackPanel>
+                            <TextBlock Text="&#xE77B;" FontFamily="Segoe MDL2 Assets" FontSize="32" HorizontalAlignment="Center" />
+                            <TextBlock Text="WEBP → PNG" HorizontalAlignment="Center" Margin="0,6,0,0" />
+                        </StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource IconActionButtonStyle}" Tag="Trim" Click="ActionShortcut_OnClick" ToolTip="Удалить нижний водяной знак">
+                        <StackPanel>
+                            <TextBlock Text="&#xE8FD;" FontFamily="Segoe MDL2 Assets" FontSize="32" HorizontalAlignment="Center" />
+                            <TextBlock Text="Обрезать водяной знак" HorizontalAlignment="Center" Margin="0,6,0,0" />
+                        </StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource IconActionButtonStyle}" Tag="Resize" Click="ActionShortcut_OnClick" ToolTip="Принудительное изменение размера">
+                        <StackPanel>
+                            <TextBlock Text="&#xE8D7;" FontFamily="Segoe MDL2 Assets" FontSize="32" HorizontalAlignment="Center" />
+                            <TextBlock Text="Изменить размер" HorizontalAlignment="Center" Margin="0,6,0,0" />
+                        </StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource IconActionButtonStyle}" Tag="Watermark" Click="ActionShortcut_OnClick" ToolTip="Изменить размер и добавить водяной знак">
+                        <StackPanel>
+                            <TextBlock Text="&#xE7BA;" FontFamily="Segoe MDL2 Assets" FontSize="32" HorizontalAlignment="Center" />
+                            <TextBlock Text="Размер + водяной знак" TextAlignment="Center" Margin="0,6,0,0" />
+                        </StackPanel>
+                    </Button>
+                </UniformGrid>
+            </Border>
+
+            <Border x:Name="DetailsCard" Grid.Row="3" Background="{StaticResource CardBrush}" CornerRadius="12" Padding="20" Margin="0,20,0,0" BorderBrush="{StaticResource BorderBrushColor}" BorderThickness="1" Visibility="Collapsed">
+                <StackPanel>
+                    <DockPanel>
+                        <TextBlock x:Name="DetailsHeader" FontSize="20" FontWeight="Bold" DockPanel.Dock="Left" />
+                        <Button Content="Закрыть" Width="110" DockPanel.Dock="Right" Click="HideDetailsButton_OnClick" />
+                    </DockPanel>
+                    <Separator Margin="0,12,0,16" />
+
+                    <Grid>
+                        <Grid x:Name="ConvertForm" Visibility="Collapsed">
+                            <StackPanel>
+                                <TextBlock Text="Конвертация всех WEBP файлов в PNG с удалением оригиналов." TextWrapping="Wrap" Foreground="#B0B4C1"/>
+                                <Button x:Name="ConvertButton" Content="Запустить конвертацию" Height="40" Margin="0,16,0,0" Click="ConvertButton_OnClick" />
+                            </StackPanel>
+                        </Grid>
+
+                        <Grid x:Name="TrimForm" Visibility="Collapsed">
+                            <StackPanel>
+                                <TextBlock Text="Удаление горизонтальной полосы (водяного знака) снизу PNG/JPG файлов." TextWrapping="Wrap" Foreground="#B0B4C1" />
+                                <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                                    <TextBlock Text="Пиксели" VerticalAlignment="Center" />
+                                    <TextBox x:Name="PixelsToTrimTextBox"
+                                             Width="140"
+                                             Margin="12,0,0,0"
+                                             VerticalContentAlignment="Center"
+                                             PreviewTextInput="NumericTextBox_OnPreviewTextInput"
+                                             DataObject.Pasting="NumericTextBox_OnPaste" />
+                                </StackPanel>
+                                <Button Content="Удалить полосу" Height="40" Margin="0,16,0,0" Click="TrimButton_OnClick" />
+                            </StackPanel>
+                        </Grid>
+
+                        <Grid x:Name="ResizeForm" Visibility="Collapsed">
+                            <StackPanel>
+                                <TextBlock Text="Принудительное изменение размера PNG/JPG файлов (пропорции будут растянуты)." TextWrapping="Wrap" Foreground="#B0B4C1" />
+                                <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                                    <StackPanel Width="160">
+                                        <TextBlock Text="Ширина (px)" />
+                                        <TextBox x:Name="ResizeWidthTextBox"
+                                                 Margin="0,4,0,0"
+                                                 VerticalContentAlignment="Center"
+                                                 PreviewTextInput="NumericTextBox_OnPreviewTextInput"
+                                                 DataObject.Pasting="NumericTextBox_OnPaste" />
+                                    </StackPanel>
+                                    <StackPanel Width="160" Margin="20,0,0,0">
+                                        <TextBlock Text="Высота (px)" />
+                                        <TextBox x:Name="ResizeHeightTextBox"
+                                                 Margin="0,4,0,0"
+                                                 VerticalContentAlignment="Center"
+                                                 PreviewTextInput="NumericTextBox_OnPreviewTextInput"
+                                                 DataObject.Pasting="NumericTextBox_OnPaste" />
+                                    </StackPanel>
+                                </StackPanel>
+                                <Button Content="Изменить размер" Height="40" Margin="0,16,0,0" Click="ResizeButton_OnClick" />
+                            </StackPanel>
+                        </Grid>
+
+                        <Grid x:Name="WatermarkForm" Visibility="Collapsed">
+                            <StackPanel>
+                                <TextBlock Text="Изменение размера и добавление выбранного PNG водяного знака." TextWrapping="Wrap" Foreground="#B0B4C1" />
+                                <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                                    <StackPanel Width="160">
+                                        <TextBlock Text="Ширина (px)" />
+                                        <TextBox x:Name="WatermarkWidthTextBox"
+                                                 Margin="0,4,0,0"
+                                                 VerticalContentAlignment="Center"
+                                                 PreviewTextInput="NumericTextBox_OnPreviewTextInput"
+                                                 DataObject.Pasting="NumericTextBox_OnPaste" />
+                                    </StackPanel>
+                                    <StackPanel Width="160" Margin="20,0,0,0">
+                                        <TextBlock Text="Высота (px)" />
+                                        <TextBox x:Name="WatermarkHeightTextBox"
+                                                 Margin="0,4,0,0"
+                                                 VerticalContentAlignment="Center"
+                                                 PreviewTextInput="NumericTextBox_OnPreviewTextInput"
+                                                 DataObject.Pasting="NumericTextBox_OnPaste" />
+                                    </StackPanel>
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                                    <TextBox x:Name="WatermarkPathTextBox" IsReadOnly="True" Width="240" />
+                                    <Button Content="Выбрать PNG" Width="150" Margin="12,0,0,0" Click="ChooseWatermarkButton_OnClick" />
+                                </StackPanel>
+                                <Button Content="Изменить размер и нанести" Height="40" Margin="0,16,0,0" Click="WatermarkButton_OnClick" />
+                            </StackPanel>
+                        </Grid>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <StatusBar Grid.Row="4" Margin="0,24,0,0" Background="#0D0F14" Foreground="#F5F5F5">
+                <StatusBarItem>
+                    <TextBlock x:Name="StatusTextBlock" Text="Готов" />
+                </StatusBarItem>
+                <StatusBarItem>
+                    <ProgressBar x:Name="ProgressIndicator" Width="180" Height="14" Visibility="Collapsed" IsIndeterminate="True" />
+                </StatusBarItem>
+                <StatusBarItem HorizontalAlignment="Right">
+                    <Button x:Name="ToggleLogsButton" Content="Логи" Click="ShowLogsButton_OnClick" />
+                </StatusBarItem>
+            </StatusBar>
+        </Grid>
+
+        <Border x:Name="LogsOverlay" Background="#AA000000" Visibility="Collapsed">
+            <Border Background="#141821" CornerRadius="12" Padding="16" Width="600" Height="380" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,40,40,0" BorderBrush="{StaticResource BorderBrushColor}" BorderThickness="1">
+                <DockPanel>
+                    <DockPanel DockPanel.Dock="Top" LastChildFill="False">
+                        <TextBlock Text="История операций" FontSize="16" FontWeight="Bold" VerticalAlignment="Center" DockPanel.Dock="Left" />
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" DockPanel.Dock="Right">
+                            <Button Content="Очистить" Margin="0,0,8,0" Click="ClearLogButton_OnClick" />
+                            <Button Content="Закрыть" Click="HideLogsButton_OnClick" />
+                        </StackPanel>
+                    </DockPanel>
+                    <TextBox x:Name="LogTextBox"
+                             AcceptsReturn="True"
+                             TextWrapping="Wrap"
+                             IsReadOnly="True"
+                             VerticalScrollBarVisibility="Auto"
+                             HorizontalScrollBarVisibility="Auto"
+                             FontFamily="Consolas"
+                             Margin="0,12,0,0" />
+                </DockPanel>
+            </Border>
+        </Border>
+    </Grid>
+</Window>
