@@ -12,7 +12,8 @@ internal sealed class ImageOperationExecutionContext
 internal readonly record struct FileProcessingUpdate(
     string FilePath,
     FileProcessingState State,
-    int TotalFiles);
+    int TotalFiles,
+    string? ErrorMessage = null);
 
 internal enum FileProcessingState
 {

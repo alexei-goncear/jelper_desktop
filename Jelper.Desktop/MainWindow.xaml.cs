@@ -41,6 +41,8 @@ public partial class MainWindow : Window, ILogSink
     private int _completedFilesInOperation;
     private int _totalFilesInOperation;
     private readonly DispatcherTimer _etaUpdateTimer;
+    private DateTimeOffset? _currentFileStartTimestamp;
+    private double _lastAverageSeconds;
 
     public MainWindow()
     {
@@ -560,6 +562,8 @@ public partial class MainWindow : Window, ILogSink
         _completedFilesInOperation = 0;
         _totalFilesInOperation = files.Count;
         _operationStartTimestamp = null;
+        _currentFileStartTimestamp = null;
+        _lastAverageSeconds = 0;
 
         CurrentOperationText.Text = description;
         ProgressSummaryText.Text = _totalFilesInOperation > 0
@@ -585,26 +589,33 @@ public partial class MainWindow : Window, ILogSink
         switch (update.State)
         {
             case FileProcessingState.Started:
+                _currentFileStartTimestamp = DateTimeOffset.Now;
                 item.SetState(FileProcessingDisplayState.Processing);
                 ProcessingFilesList.SelectedItem = item;
                 ProcessingFilesList.ScrollIntoView(item);
                 break;
             case FileProcessingState.Completed:
+                _currentFileStartTimestamp = null;
                 if (item.SetState(FileProcessingDisplayState.Completed))
                 {
                     _completedFilesInOperation++;
+                    UpdateAverageDuration();
                 }
                 break;
             case FileProcessingState.Skipped:
+                _currentFileStartTimestamp = null;
                 if (item.SetState(FileProcessingDisplayState.Skipped))
                 {
                     _completedFilesInOperation++;
+                    UpdateAverageDuration();
                 }
                 break;
             case FileProcessingState.Failed:
-                if (item.SetState(FileProcessingDisplayState.Failed))
+                _currentFileStartTimestamp = null;
+                if (item.SetState(FileProcessingDisplayState.Failed, update.ErrorMessage))
                 {
                     _completedFilesInOperation++;
+                    UpdateAverageDuration();
                 }
                 break;
         }
@@ -635,22 +646,48 @@ public partial class MainWindow : Window, ILogSink
             return string.Empty;
         }
 
-        if (completed == 0 || !_operationStartTimestamp.HasValue)
-        {
-            return "ETA появится после обработки первого файла.";
-        }
-
-        var elapsed = DateTimeOffset.Now - _operationStartTimestamp.Value;
-        if (elapsed.TotalSeconds <= 0)
+        if (!_operationStartTimestamp.HasValue)
         {
             return "ETA рассчитывается...";
         }
 
-        var averageSeconds = elapsed.TotalSeconds / completed;
+        if (completed == 0 || _lastAverageSeconds <= 0)
+        {
+            return "ETA появится после обработки первого файла.";
+        }
+
+        var perFileSeconds = Math.Max(0.1, _lastAverageSeconds);
         var remainingFiles = Math.Max(0, total - completed);
-        var remainingSeconds = averageSeconds * remainingFiles;
+        var remainingSeconds = perFileSeconds * remainingFiles;
+
+        if (_currentFileStartTimestamp.HasValue && completed < total)
+        {
+            var elapsedCurrent = (DateTimeOffset.Now - _currentFileStartTimestamp.Value).TotalSeconds;
+            if (elapsedCurrent > 0)
+            {
+                var deduction = Math.Min(elapsedCurrent, perFileSeconds);
+                remainingSeconds = Math.Max(0, remainingSeconds - deduction);
+            }
+        }
+
         var eta = TimeSpan.FromSeconds(Math.Max(0, remainingSeconds));
         return $"Оставшееся время ~{eta:hh\\:mm\\:ss}";
+    }
+
+    private void UpdateAverageDuration()
+    {
+        if (!_operationStartTimestamp.HasValue || _completedFilesInOperation <= 0)
+        {
+            return;
+        }
+
+        var elapsed = (DateTimeOffset.Now - _operationStartTimestamp.Value).TotalSeconds;
+        if (elapsed <= 0)
+        {
+            return;
+        }
+
+        _lastAverageSeconds = Math.Max(0.1, elapsed / _completedFilesInOperation);
     }
 
     private void RefreshEtaText()
@@ -679,6 +716,9 @@ public partial class MainWindow : Window, ILogSink
         {
             _etaUpdateTimer.Stop();
         }
+
+        _currentFileStartTimestamp = null;
+        _lastAverageSeconds = 0;
     }
 
     private FileProcessingItem GetOrCreateFileItem(string filePath)
@@ -781,6 +821,7 @@ public partial class MainWindow : Window, ILogSink
         private static readonly System.Windows.Media.Brush FailedBrush = CreateBrush(0xF4, 0x5B, 0x69);
         private static readonly System.Windows.Media.Brush CancelledBrush = CreateBrush(0xFF, 0x9F, 0x43);
         private FileProcessingDisplayState _state = FileProcessingDisplayState.Waiting;
+        private string _errorMessage = string.Empty;
 
         public FileProcessingItem(string filePath)
         {
@@ -789,6 +830,20 @@ public partial class MainWindow : Window, ILogSink
 
         public string FilePath { get; }
         public string FileName => Path.GetFileName(FilePath);
+        public string ErrorMessage
+        {
+            get => _errorMessage;
+            private set
+            {
+                if (string.Equals(_errorMessage, value, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                _errorMessage = value;
+                OnPropertyChanged(nameof(ErrorMessage));
+            }
+        }
 
         public string StatusText => _state switch
         {
@@ -817,14 +872,19 @@ public partial class MainWindow : Window, ILogSink
             or FileProcessingDisplayState.Failed
             or FileProcessingDisplayState.Cancelled;
 
-        public bool SetState(FileProcessingDisplayState newState)
+        public bool SetState(FileProcessingDisplayState newState, string? errorMessage = null)
         {
-            if (_state == newState)
+            var normalizedError = newState == FileProcessingDisplayState.Failed
+                ? errorMessage ?? string.Empty
+                : string.Empty;
+
+            if (_state == newState && string.Equals(ErrorMessage, normalizedError, StringComparison.Ordinal))
             {
                 return false;
             }
 
             _state = newState;
+            ErrorMessage = normalizedError;
             OnPropertyChanged(nameof(StatusText));
             OnPropertyChanged(nameof(StatusBrush));
             return true;

@@ -86,7 +86,7 @@ internal sealed class ImageOperations
             catch (Exception ex)
             {
                 _log.Error($"{progress} Failed to convert {fileName}: {ex.Message}");
-                ReportProgress(context, file, FileProcessingState.Failed, total);
+                ReportProgress(context, file, FileProcessingState.Failed, total, ex.Message);
             }
         }
 
@@ -148,7 +148,7 @@ internal sealed class ImageOperations
             catch (Exception ex)
             {
                 _log.Error($"{progress} Failed to update {fileName}: {ex.Message}");
-                ReportProgress(context, file, FileProcessingState.Failed, total);
+                ReportProgress(context, file, FileProcessingState.Failed, total, ex.Message);
             }
         }
 
@@ -194,7 +194,7 @@ internal sealed class ImageOperations
             catch (Exception ex)
             {
                 _log.Error($"{progress} Failed to resize {fileName}: {ex.Message}");
-                ReportProgress(context, file, FileProcessingState.Failed, total);
+                ReportProgress(context, file, FileProcessingState.Failed, total, ex.Message);
             }
         }
 
@@ -268,7 +268,7 @@ internal sealed class ImageOperations
                 catch (Exception ex)
                 {
                     _log.Error($"{progress} Failed to watermark {fileName}: {ex.Message}");
-                    ReportProgress(context, file, FileProcessingState.Failed, total);
+                    ReportProgress(context, file, FileProcessingState.Failed, total, ex.Message);
                 }
             }
 
@@ -345,9 +345,9 @@ internal sealed class ImageOperations
 
     private static string FormatProgress(int current, int total) => $"[{current}/{total}]";
 
-    private static void ReportProgress(ImageOperationExecutionContext context, string file, FileProcessingState state, int total)
+    private static void ReportProgress(ImageOperationExecutionContext context, string file, FileProcessingState state, int total, string? errorMessage = null)
     {
-        context.ReportProgress(new FileProcessingUpdate(file, state, total));
+        context.ReportProgress(new FileProcessingUpdate(file, state, total, errorMessage));
     }
 
     private void TryDeleteSource(string sourcePath, string progress)
