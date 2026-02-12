@@ -114,7 +114,13 @@
             </Border>
 
             <Border Grid.Row="2" Background="{StaticResource CardBrush}" CornerRadius="10" Padding="16" Margin="0,20,0,0" BorderBrush="{StaticResource BorderBrushColor}" BorderThickness="1">
-                <UniformGrid x:Name="ActionsPanel" Columns="4" Rows="1" Margin="0,4,0,0">
+                <UniformGrid x:Name="ActionsPanel" Columns="5" Rows="1" Margin="0,4,0,0">
+                    <Button Style="{StaticResource IconActionButtonStyle}" Tag="RecraftUpscale" Click="ActionShortcut_OnClick" ToolTip="Улучшить качество через Recraft API">
+                        <StackPanel>
+                            <TextBlock Text="&#xE777;" FontFamily="Segoe MDL2 Assets" FontSize="32" HorizontalAlignment="Center" />
+                            <TextBlock Text="Recraft Upscale" TextAlignment="Center" Margin="0,6,0,0" />
+                        </StackPanel>
+                    </Button>
                     <Button Style="{StaticResource IconActionButtonStyle}" Tag="Convert" Click="ActionShortcut_OnClick" ToolTip="Конвертация WEBP в PNG">
                         <StackPanel>
                             <TextBlock Text="&#xE8AB;" FontFamily="Segoe MDL2 Assets" FontSize="32" HorizontalAlignment="Center" />
@@ -155,6 +161,13 @@
                     <Separator Margin="0,12,0,16" />
 
                     <Grid>
+                        <Grid x:Name="RecraftUpscaleForm" Visibility="Collapsed">
+                            <StackPanel>
+                                <TextBlock Text="Онлайн-апскейл всех PNG/JPG через Recraft Crisp Upscale." TextWrapping="Wrap" Foreground="#B0B4C1" />
+                                <Button Content="Запустить Recraft Upscale" Height="40" Margin="0,16,0,0" Click="RecraftUpscaleButton_OnClick" />
+                            </StackPanel>
+                        </Grid>
+
                         <Grid x:Name="ConvertForm" Visibility="Collapsed">
                             <StackPanel>
                                 <TextBlock Text="Конвертация файлов между поддерживаемыми форматами. Исходники удаляются после успешного преобразования." TextWrapping="Wrap" Foreground="#B0B4C1" />

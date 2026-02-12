@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -10,6 +11,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Navigation;
 using System.Windows.Threading;
 using Jelper.Desktop.Infrastructure;
 using Jelper.Desktop.Services;
@@ -60,6 +62,7 @@ public partial class MainWindow : Window, ILogSink
 
         _operationViews = new Dictionary<OperationPanel, UIElement>
         {
+            { OperationPanel.RecraftUpscale, RecraftUpscaleForm },
             { OperationPanel.Convert, ConvertForm },
             { OperationPanel.Trim, TrimForm },
             { OperationPanel.Resize, ResizeForm },
@@ -92,7 +95,7 @@ public partial class MainWindow : Window, ILogSink
         }
 
         var description = $"Конвертация {conversion.SourceLabel} → {conversion.TargetLabel}...";
-        await RunOperationAsync(description, files, ctx => _operations.ConvertFiles(files, conversion.TargetExtension, ctx));
+        await RunOperationAsync(description, files, ctx => Task.Run(() => _operations.ConvertFiles(files, conversion.TargetExtension, ctx), ctx.CancellationToken));
     }
 
     private async void TrimButton_OnClick(object sender, RoutedEventArgs e)
@@ -109,7 +112,7 @@ public partial class MainWindow : Window, ILogSink
             return;
         }
 
-        await RunOperationAsync($"Removing {pixels}px watermark strip...", files, ctx => _operations.RemoveWatermark(pixels, files, ctx));
+        await RunOperationAsync($"Removing {pixels}px watermark strip...", files, ctx => Task.Run(() => _operations.RemoveWatermark(pixels, files, ctx), ctx.CancellationToken));
     }
 
     private async void ResizeButton_OnClick(object sender, RoutedEventArgs e)
@@ -127,7 +130,7 @@ public partial class MainWindow : Window, ILogSink
             return;
         }
 
-        await RunOperationAsync($"Resizing images to {width}x{height}...", files, ctx => _operations.ResizeImages(width, height, files, ctx));
+        await RunOperationAsync($"Resizing images to {width}x{height}...", files, ctx => Task.Run(() => _operations.ResizeImages(width, height, files, ctx), ctx.CancellationToken));
     }
 
     private async void WatermarkButton_OnClick(object sender, RoutedEventArgs e)
@@ -154,7 +157,21 @@ public partial class MainWindow : Window, ILogSink
 
         await RunOperationAsync($"Resizing and watermarking with {Path.GetFileName(watermarkPath)}...",
             files,
-            ctx => _operations.ResizeAndWatermark(width, height, watermarkPath, files, ctx));
+            ctx => Task.Run(() => _operations.ResizeAndWatermark(width, height, watermarkPath, files, ctx), ctx.CancellationToken));
+    }
+
+    private async void RecraftUpscaleButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (!EnsureImagesFolderSelected() ||
+            !TryGetFiles(OperationPanel.RecraftUpscale, out var files) ||
+            !ConfirmOperationCount(files.Count))
+        {
+            return;
+        }
+
+        await RunOperationAsync("Recraft upscale in progress...",
+            files,
+            ctx => _operations.UpscaleWithRecraftAsync(files, ctx));
     }
 
     private void BrowseFolderButton_OnClick(object sender, RoutedEventArgs e)
@@ -186,6 +203,24 @@ public partial class MainWindow : Window, ILogSink
             WatermarkPathTextBox.Text = dialog.FileName;
             AppendLog($"Selected watermark: {Path.GetFileName(dialog.FileName)}");
         }
+    }
+
+    private void Hyperlink_OnRequestNavigate(object sender, RequestNavigateEventArgs e)
+    {
+        try
+        {
+            var uri = e.Uri?.AbsoluteUri;
+            if (!string.IsNullOrWhiteSpace(uri))
+            {
+                Process.Start(new ProcessStartInfo(uri) { UseShellExecute = true });
+            }
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Failed to open link: {ex.Message}", isError: true);
+        }
+
+        e.Handled = true;
     }
 
     private void ClearLogButton_OnClick(object sender, RoutedEventArgs e)
@@ -266,6 +301,7 @@ public partial class MainWindow : Window, ILogSink
     private string GetPanelTitle(OperationPanel panel) => panel switch
     {
         OperationPanel.Convert => "Конвертация",
+        OperationPanel.RecraftUpscale => "Recraft Upscale",
         OperationPanel.Trim => "Удаление водяного знака",
         OperationPanel.Resize => "Изменение размера",
         OperationPanel.Watermark => "Размер + водяной знак",
@@ -325,6 +361,7 @@ public partial class MainWindow : Window, ILogSink
     {
         files = panel switch
         {
+            OperationPanel.RecraftUpscale => _operations.ListSupportedImageFiles(),
             OperationPanel.Trim => _operations.ListSupportedImageFiles(),
             OperationPanel.Resize => _operations.ListSupportedImageFiles(),
             OperationPanel.Watermark => _operations.ListSupportedImageFiles(),
@@ -474,7 +511,7 @@ public partial class MainWindow : Window, ILogSink
         return path;
     }
 
-    private async Task RunOperationAsync(string statusMessage, IReadOnlyList<string> files, Action<ImageOperationExecutionContext> action)
+    private async Task RunOperationAsync(string statusMessage, IReadOnlyList<string> files, Func<ImageOperationExecutionContext, Task> action)
     {
         if (_isBusy)
         {
@@ -503,7 +540,7 @@ public partial class MainWindow : Window, ILogSink
 
         try
         {
-            await Task.Run(() => action(context));
+            await action(context);
 
             if (_operationCancellation?.IsCancellationRequested == true)
             {
@@ -918,6 +955,7 @@ public partial class MainWindow : Window, ILogSink
     private enum OperationPanel
     {
         None,
+        RecraftUpscale,
         Convert,
         Trim,
         Resize,
