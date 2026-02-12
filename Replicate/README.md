@@ -1,10 +1,11 @@
 # Мини-приложение для Replicate
 
-Этот скрипт показывает, как вызвать модель `recraft-ai/recraft-crisp-upscale` из сервиса [Replicate](https://replicate.com/) и сохранить результат локально.
+`recraft_cli.py` — это thin-wrapper вокруг модели `recraft-ai/recraft-crisp-upscale` в [Replicate](https://replicate.com/). Скрипт принимает параметры из .NET-клиента, скачивает результат и выводит JSON с итогом.
 
 ## Требования
 - Python 3.10+
-- Аккаунт в Replicate и персональный токен доступа (`REPLICATE_API_TOKEN`).
+- Установленные зависимости `pip install -r requirements.txt`
+- Переменная окружения `REPLICATE_API_TOKEN`
 
 ## Настройка окружения
 ```bash
@@ -14,17 +15,18 @@ pip install -r requirements.txt
 ```
 
 ## Запуск
-1. Передайте токен либо переменной окружения, либо аргументом `--token`:
-   - macOS/Linux: `export REPLICATE_API_TOKEN="r8_..."`
-   - PowerShell: `$env:REPLICATE_API_TOKEN="r8_..."`
-   - CLI аргумент: `--token r8_...`
-2. Выполните скрипт, указав URL/путь исходного изображения и имя файла для результата:
-   ```bash
-   python recraft_cli.py --image "https://replicate.delivery/pbxt/MKdkS3Po0PXytPbTXh4bOlBX1BZRuXH4o34yXVEakeBlpiTW/blonde_mj.png" --output output.webp --token r8_...
-   ```
-3. После успешного завершения команда вернёт URL сгенерированного файла на CDN Replicate и путь до сохранённого локального файла.
+```bash
+export REPLICATE_API_TOKEN="r8_..."  # Windows PowerShell: $env:REPLICATE_API_TOKEN="r8_..."
+python recraft_cli.py --image "~/Pictures/source.png" --output "~/Pictures/source.upscaled.png" --mode upscale16mp
+```
+
+После успешного выполнения в STDOUT попадёт JSON вида:
+
+```json
+{"status":"ok","output_path":"/abs/path/source.upscaled.png","remote_url":"https://replicate.delivery/...","message":"mode=upscale16mp"}
+```
 
 ## Полезно знать
-- В `--image/--image-url` можно передать либо публичный URL, либо путь к локальному файлу (например `C:\Users\me\image.png`).
-- Вы можете передать любой путь в `--output`, например `artifacts/upscaled.webp`; папки будут созданы автоматически.
-- Повторный запуск с тем же путём перезапишет файл.
+- В `--image` можно передать либо публичный URL, либо путь к локальному файлу.
+- Путь из `--output` создаётся автоматически (папки будут вложены).
+- В случае ошибки информация уходит в STDERR и процесс завершается с кодом `1`.

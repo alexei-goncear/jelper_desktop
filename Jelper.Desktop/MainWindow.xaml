@@ -58,6 +58,14 @@
             <Setter Property="Padding" Value="8,4" />
         </Style>
 
+        <Style TargetType="PasswordBox">
+            <Setter Property="Background" Value="#1C212B" />
+            <Setter Property="Foreground" Value="#F5F5F5" />
+            <Setter Property="BorderBrush" Value="#2E3543" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="8,4" />
+        </Style>
+
         <Style TargetType="ComboBox">
             <Setter Property="Background" Value="#1C212B" />
             <Setter Property="Foreground" Value="#F5F5F5" />
@@ -164,6 +172,18 @@
                         <Grid x:Name="RecraftUpscaleForm" Visibility="Collapsed">
                             <StackPanel>
                                 <TextBlock Text="Онлайн-апскейл всех PNG/JPG через Recraft Crisp Upscale." TextWrapping="Wrap" Foreground="#B0B4C1" />
+                                <TextBlock Text="Введите персональный токен Replicate (REPLICATE_API_TOKEN)." Margin="0,12,0,0" />
+                                <PasswordBox x:Name="ReplicateTokenBox"
+                                             Margin="0,6,0,0"
+                                             ToolTip="Токен Replicate"
+                                             HorizontalAlignment="Left"
+                                             Width="280" />
+                                <TextBlock Margin="0,10,0,0" Foreground="#B0B4C1" TextWrapping="Wrap">
+                                    <Run Text="Для работы нужен Python 3.10+. Если он не установлен, скачайте его с " />
+                                    <Hyperlink NavigateUri="https://www.python.org/downloads/"
+                                               RequestNavigate="Hyperlink_OnRequestNavigate">python.org</Hyperlink>
+                                    <Run Text="." />
+                                </TextBlock>
                                 <Button Content="Запустить Recraft Upscale" Height="40" Margin="0,16,0,0" Click="RecraftUpscaleButton_OnClick" />
                             </StackPanel>
                         </Grid>

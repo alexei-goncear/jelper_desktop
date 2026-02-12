@@ -25,6 +25,10 @@ namespace Jelper.Desktop;
 
 public partial class MainWindow : Window, ILogSink
 {
+    private static readonly string[] PythonExecutableCandidates = { "python", "python3", "py" };
+    private const string PythonDownloadUrl = "https://www.python.org/downloads/";
+    private const string RecraftCliRelativePath = "Replicate/recraft_cli.py";
+    private const string ReplicateTokenEnvVar = "REPLICATE_API_TOKEN";
     private readonly ImageOperations _operations;
     private readonly List<ConversionOption> _conversionOptions = new()
     {
@@ -72,6 +76,12 @@ public partial class MainWindow : Window, ILogSink
         _operations = new ImageOperations(this, GetImagesFolderPath);
 
         InitializeConversionControls();
+
+        var savedToken = UserSettings.LoadReplicateToken();
+        if (!string.IsNullOrWhiteSpace(savedToken))
+        {
+            ReplicateTokenBox.Password = savedToken;
+        }
 
         var savedPath = UserSettings.LoadImagesFolderPath();
         if (!string.IsNullOrWhiteSpace(savedPath))
@@ -169,9 +179,46 @@ public partial class MainWindow : Window, ILogSink
             return;
         }
 
+        var token = GetReplicateToken();
+        if (token == null)
+        {
+            const string title = "Токен не указан";
+            const string message = "Введите персональный токен Replicate, чтобы продолжить.";
+            WpfMessageBox.Show(this, message, title, MessageBoxButton.OK, MessageBoxImage.Information);
+        
+            return;
+        }
+
+        Environment.SetEnvironmentVariable(ReplicateTokenEnvVar, token, EnvironmentVariableTarget.Process);
+
+        if (!TryFindPythonRuntime(out var pythonRuntime))
+        {
+            ShowPythonMissingMessage();
+            return;
+        }
+
+        if (!TryResolveRecraftCli(out var scriptPath))
+        {
+            const string title = "Скрипт не найден";
+            var message = "Файл Replicate/recraft_cli.py не найден рядом с приложением. Проверьте, что он скопирован вместе с программой.";
+            AppendLog(message, isError: true);
+            WpfMessageBox.Show(this, message, title, MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
+
+        UserSettings.SaveReplicateToken(token);
+
+        var options = new RecraftUpscaleOptions
+        {
+            PythonExecutablePath = pythonRuntime.Executable,
+            PythonVersionDescription = pythonRuntime.VersionText,
+            ScriptPath = scriptPath,
+            ApiToken = token
+        };
+
         await RunOperationAsync("Recraft upscale in progress...",
             files,
-            ctx => _operations.UpscaleWithRecraftAsync(files, ctx));
+            ctx => _operations.UpscaleWithRecraftAsync(files, ctx, options));
     }
 
     private void BrowseFolderButton_OnClick(object sender, RoutedEventArgs e)
@@ -836,6 +883,98 @@ public partial class MainWindow : Window, ILogSink
         e.CancelCommand();
     }
 
+    private string? GetReplicateToken()
+    {
+        var value = ReplicateTokenBox.Password?.Trim();
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    private bool TryResolveRecraftCli(out string scriptPath)
+    {
+        var baseDirectory = AppContext.BaseDirectory;
+        var candidate = Path.Combine(baseDirectory, RecraftCliRelativePath);
+        if (File.Exists(candidate))
+        {
+            scriptPath = candidate;
+            return true;
+        }
+
+        scriptPath = string.Empty;
+        return false;
+    }
+
+    private bool TryFindPythonRuntime(out PythonRuntimeInfo runtime)
+    {
+        foreach (var executable in PythonExecutableCandidates)
+        {
+            var detected = TryDetectPythonRuntime(executable);
+            if (detected.HasValue)
+            {
+                runtime = detected.Value;
+                var version = string.IsNullOrWhiteSpace(runtime.VersionText) ? "Python" : runtime.VersionText;
+                AppendLog($"Используется {version} ({runtime.Executable}).");
+                return true;
+            }
+        }
+
+        runtime = default;
+        return false;
+    }
+
+    private PythonRuntimeInfo? TryDetectPythonRuntime(string executable)
+    {
+        try
+        {
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = executable,
+                Arguments = "--version",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+                UseShellExecute = false
+            };
+
+            using var process = Process.Start(startInfo);
+            if (process == null)
+            {
+                return null;
+            }
+
+            var stdout = process.StandardOutput.ReadToEnd();
+            var stderr = process.StandardError.ReadToEnd();
+            process.WaitForExit();
+
+            if (process.ExitCode != 0)
+            {
+                return null;
+            }
+
+            var version = !string.IsNullOrWhiteSpace(stdout) ? stdout.Trim() : stderr.Trim();
+            return new PythonRuntimeInfo(executable, string.IsNullOrWhiteSpace(version) ? null : version);
+        }
+        catch (Win32Exception)
+        {
+            return null;
+        }
+        catch (FileNotFoundException)
+        {
+            return null;
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Не удалось проверить Python ({executable}): {ex.Message}", isError: true);
+            return null;
+        }
+    }
+
+    private void ShowPythonMissingMessage()
+    {
+        var message = $"Python не найден. Установите Python 3.10+ отсюда: {PythonDownloadUrl}";
+        AppendLog(message, isError: true);
+        WpfMessageBox.Show(this, message, "Python не найден", MessageBoxButton.OK, MessageBoxImage.Warning);
+    }
+
     private void AppendLog(string message, bool isError = false)
     {
         Dispatcher.Invoke(() =>
@@ -846,6 +985,8 @@ public partial class MainWindow : Window, ILogSink
             LogTextBox.ScrollToEnd();
         });
     }
+
+    private readonly record struct PythonRuntimeInfo(string Executable, string? VersionText);
 
     private sealed record ConversionOption(string SourceLabel, string SourcePattern, string TargetLabel, string TargetExtension);
 

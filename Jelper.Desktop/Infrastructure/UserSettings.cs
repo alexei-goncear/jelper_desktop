@@ -10,6 +10,7 @@ internal static class UserSettings
         "JelperDesktop");
 
     private static readonly string ImagesPathFile = Path.Combine(SettingsFolder, "images-path.txt");
+    private static readonly string ReplicateTokenFile = Path.Combine(SettingsFolder, "replicate-token.txt");
 
     public static string? LoadImagesFolderPath()
     {
@@ -47,6 +48,45 @@ internal static class UserSettings
         catch
         {
             // Ignore persistence errors, they should not block the UI.
+        }
+    }
+
+    public static string? LoadReplicateToken()
+    {
+        try
+        {
+            if (!File.Exists(ReplicateTokenFile))
+            {
+                return null;
+            }
+
+            var content = File.ReadAllText(ReplicateTokenFile).Trim();
+            return string.IsNullOrEmpty(content) ? null : content;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public static void SaveReplicateToken(string? token)
+    {
+        try
+        {
+            Directory.CreateDirectory(SettingsFolder);
+
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                File.WriteAllText(ReplicateTokenFile, string.Empty);
+            }
+            else
+            {
+                File.WriteAllText(ReplicateTokenFile, token);
+            }
+        }
+        catch
+        {
+            // Ignore persistence errors.
         }
     }
 }

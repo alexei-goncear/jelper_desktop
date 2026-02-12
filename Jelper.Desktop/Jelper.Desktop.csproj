@@ -22,4 +22,15 @@
     <Resource Include="jelper.ico" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="..\Replicate\recraft_cli.py">
+      <Link>Replicate\recraft_cli.py</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="..\Replicate\requirements.txt">
+      <Link>Replicate\requirements.txt</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

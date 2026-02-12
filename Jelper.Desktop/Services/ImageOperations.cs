@@ -1,9 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Net.Http;
-using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -16,10 +15,7 @@ internal sealed class ImageOperations
 {
     private static readonly string[] SupportedImagePatterns = { "*.png", "*.jpg", "*.jpeg" };
     private const string RecraftDefaultUpscaleMode = "upscale16mp";
-    private const string RecraftApiTokenEnvVar = "RECRAFT_API_TOKEN";
-    private const string LegacyReplicateApiTokenEnvVar = "REPLICATE_API_TOKEN";
-    private static readonly Uri RecraftApiBaseUri = new("https://external.api.recraft.ai/");
-    private const string RecraftCrispUpscalePath = "v1/images/crispUpscale";
+    private const string ReplicateApiTokenEnvVar = "REPLICATE_API_TOKEN";
     private readonly ILogSink _log;
     private readonly Func<string> _imagesDirectoryProvider;
 
@@ -286,10 +282,11 @@ internal sealed class ImageOperations
         }
     }
 
-    public async Task UpscaleWithRecraftAsync(IReadOnlyList<string> files, ImageOperationExecutionContext context)
+    public async Task UpscaleWithRecraftAsync(IReadOnlyList<string> files, ImageOperationExecutionContext context, RecraftUpscaleOptions options)
     {
         ArgumentNullException.ThrowIfNull(files);
         ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(options);
 
         if (files.Count == 0)
         {
@@ -297,21 +294,35 @@ internal sealed class ImageOperations
             return;
         }
 
-        var token = Environment.GetEnvironmentVariable(RecraftApiTokenEnvVar);
-        if (string.IsNullOrWhiteSpace(token))
+        var pythonExecutable = options.PythonExecutablePath?.Trim();
+        if (string.IsNullOrWhiteSpace(pythonExecutable))
         {
-            token = Environment.GetEnvironmentVariable(LegacyReplicateApiTokenEnvVar);
-        }
-
-        if (string.IsNullOrWhiteSpace(token))
-        {
-            _log.Error($"Environment variable {RecraftApiTokenEnvVar} is not set. Recraft Upscale cannot run.");
+            _log.Error("Python executable path was not provided.");
             return;
         }
 
-        using var httpClient = CreateRecraftClient(token.Trim());
+        var scriptPath = options.ScriptPath?.Trim();
+        if (string.IsNullOrWhiteSpace(scriptPath) || !File.Exists(scriptPath))
+        {
+            _log.Error("Python CLI script was not found. Recraft Upscale cannot run.");
+            return;
+        }
+
+        var token = options.ApiToken?.Trim();
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            _log.Error($"Environment variable {ReplicateApiTokenEnvVar} is not set. Recraft Upscale cannot run.");
+            return;
+        }
+
+        var pythonInfo = !string.IsNullOrWhiteSpace(options.PythonVersionDescription)
+            ? options.PythonVersionDescription!
+            : pythonExecutable;
+        _log.Info($"Python runtime: {pythonInfo}");
+        _log.Info($"Python CLI script: {scriptPath}");
+
         var total = files.Count;
-        _log.Info($"Found {total} PNG/JPG file(s). Sending to Recraft Crisp Upscale...");
+        _log.Info($"Found {total} PNG/JPG file(s). Upscaling via Python CLI...");
 
         for (var index = 0; index < total; index++)
         {
@@ -319,27 +330,35 @@ internal sealed class ImageOperations
             var file = files[index];
             var progress = FormatProgress(index + 1, total);
             var fileName = Path.GetFileName(file);
+            var outputPath = GetPythonOutputPath(file);
 
             ReportProgress(context, file, FileProcessingState.Started, total);
 
             try
             {
-                var result = await SendRecraftUpscaleRequestAsync(httpClient, file, context.CancellationToken);
+                var result = await RunPythonUpscaleAsync(file, outputPath, token, options, context.CancellationToken);
+                var producedPath = result.OutputPath;
 
-                if (!string.IsNullOrWhiteSpace(result.ImageUrl))
+                if (!File.Exists(producedPath))
                 {
-                    await DownloadResultAsync(httpClient, result.ImageUrl, file, context.CancellationToken);
-                }
-                else if (!string.IsNullOrWhiteSpace(result.Base64Data))
-                {
-                    await WriteBase64ImageAsync(result.Base64Data, file, context.CancellationToken);
-                }
-                else
-                {
-                    throw new InvalidOperationException("Recraft response did not include image data.");
+                    throw new InvalidOperationException("Python CLI did not produce an output file.");
                 }
 
-                _log.Info($"{progress} Updated {fileName} via Recraft Crisp Upscale.");
+                if (!producedPath.Equals(outputPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    File.Move(producedPath, outputPath, true);
+                    producedPath = outputPath;
+                }
+
+                TryDeleteOriginal(file, producedPath);
+
+                if (!string.IsNullOrWhiteSpace(result.RemoteUrl))
+                {
+                    _log.Info($"{progress} CDN URL: {result.RemoteUrl}");
+                }
+
+                var extra = string.IsNullOrWhiteSpace(result.Message) ? string.Empty : $" ({result.Message})";
+                _log.Info($"{progress} Updated via Python CLI{extra}. Новый файл: {producedPath}");
                 ReportProgress(context, file, FileProcessingState.Completed, total);
             }
             catch (OperationCanceledException)
@@ -356,76 +375,97 @@ internal sealed class ImageOperations
         _log.Info("Recraft Upscale finished for all PNG/JPG files.");
     }
 
-    private static HttpClient CreateRecraftClient(string token)
+    private async Task<PythonCliResult> RunPythonUpscaleAsync(string inputPath, string outputPath, string token, RecraftUpscaleOptions options, CancellationToken cancellationToken)
     {
-        var client = new HttpClient
+        var startInfo = new ProcessStartInfo
         {
-            BaseAddress = RecraftApiBaseUri,
-            Timeout = TimeSpan.FromMinutes(10)
+            FileName = options.PythonExecutablePath,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WorkingDirectory = Path.GetDirectoryName(options.ScriptPath) ?? Environment.CurrentDirectory
         };
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("JelperDesktop/1.0");
-        return client;
-    }
+        startInfo.ArgumentList.Add(options.ScriptPath);
+        startInfo.ArgumentList.Add("--image");
+        startInfo.ArgumentList.Add(inputPath);
+        startInfo.ArgumentList.Add("--output");
+        startInfo.ArgumentList.Add(outputPath);
 
-    private async Task<RecraftProcessImageResult> SendRecraftUpscaleRequestAsync(HttpClient httpClient, string filePath, CancellationToken cancellationToken)
-    {
-        using var form = new MultipartFormDataContent();
-        var fileInfo = new FileInfo(filePath);
-        var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, FileOptions.Asynchronous);
-        var fileContent = new StreamContent(fileStream);
-        fileContent.Headers.ContentType = new MediaTypeHeaderValue(GetMimeTypeForPath(filePath));
-        fileContent.Headers.ContentLength = Math.Max(0, fileInfo.Exists ? fileInfo.Length : fileStream.Length);
-        form.Add(fileContent, "image", Path.GetFileName(filePath));
-        form.Add(new StringContent("url"), "response_format");
-        form.Add(new StringContent(RecraftDefaultUpscaleMode), "upscale");
+        var mode = string.IsNullOrWhiteSpace(options.UpscaleMode) ? RecraftDefaultUpscaleMode : options.UpscaleMode!;
+        startInfo.ArgumentList.Add("--mode");
+        startInfo.ArgumentList.Add(mode);
 
-        using var response = await httpClient.PostAsync(RecraftCrispUpscalePath, form, cancellationToken);
-        var body = await response.Content.ReadAsStringAsync(cancellationToken);
-        EnsureSuccess(response, body, "request Recraft crisp upscale");
-        return ParseRecraftProcessImageResponse(body);
-    }
+        startInfo.Environment[ReplicateApiTokenEnvVar] = token;
 
-    private static async Task DownloadResultAsync(HttpClient httpClient, string downloadUrl, string destinationPath, CancellationToken cancellationToken)
-    {
-        using var request = new HttpRequestMessage(HttpMethod.Get, downloadUrl);
-        using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        var tempPath = Path.GetTempFileName();
-        await using (var outputStream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, FileOptions.Asynchronous))
+        using var process = new Process { StartInfo = startInfo };
+        if (!process.Start())
         {
-            await responseStream.CopyToAsync(outputStream, cancellationToken);
+            throw new InvalidOperationException("Failed to start Python CLI process.");
         }
 
-        File.Move(tempPath, destinationPath, true);
-    }
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
 
-    private static async Task WriteBase64ImageAsync(string base64Data, string destinationPath, CancellationToken cancellationToken)
-    {
-        var bytes = Convert.FromBase64String(base64Data);
-        await using var output = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, FileOptions.Asynchronous);
-        await output.WriteAsync(bytes, cancellationToken);
-    }
-
-    private static RecraftProcessImageResult ParseRecraftProcessImageResponse(string body)
-    {
-        if (string.IsNullOrWhiteSpace(body))
+        try
         {
-            throw new InvalidOperationException("Recraft response body was empty.");
+            await process.WaitForExitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+
+            throw;
         }
 
-        using var document = JsonDocument.Parse(body);
-        var root = document.RootElement;
-        if (!root.TryGetProperty("image", out var imageElement) || imageElement.ValueKind != JsonValueKind.Object)
+        var stdout = await stdoutTask;
+        var stderr = await stderrTask;
+
+        if (process.ExitCode != 0)
         {
-            throw new InvalidOperationException("Recraft response did not include image metadata.");
+            var message = string.IsNullOrWhiteSpace(stderr) ? stdout : stderr;
+            throw new InvalidOperationException($"Python CLI exited with code {process.ExitCode}: {message?.Trim()}");
         }
 
-        var url = TryGetString(imageElement, "url");
-        var base64 = TryGetString(imageElement, "b64_json");
-        return new RecraftProcessImageResult(url, base64);
+        var payload = stdout?.Trim();
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            throw new InvalidOperationException("Python CLI did not return any data.");
+        }
+
+        return ParsePythonCliResult(payload);
+    }
+
+    private static PythonCliResult ParsePythonCliResult(string payload)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(payload);
+            var root = document.RootElement;
+            var status = TryGetString(root, "status") ?? "ok";
+            if (!string.Equals(status, "ok", StringComparison.OrdinalIgnoreCase))
+            {
+                var error = TryGetString(root, "error") ?? TryGetString(root, "message") ?? status;
+                throw new InvalidOperationException($"Python CLI error: {error}");
+            }
+
+            var outputPath = TryGetString(root, "output_path");
+            if (string.IsNullOrWhiteSpace(outputPath))
+            {
+                throw new InvalidOperationException("Python CLI response did not include output_path.");
+            }
+
+            var remoteUrl = TryGetString(root, "remote_url");
+            var message = TryGetString(root, "message");
+            return new PythonCliResult(outputPath, remoteUrl, message);
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException($"Invalid JSON from Python CLI: {ex.Message}");
+        }
     }
 
     private static string? TryGetString(JsonElement element, string propertyName)
@@ -443,39 +483,30 @@ internal sealed class ImageOperations
         return null;
     }
 
-    private static void EnsureSuccess(HttpResponseMessage response, string body, string operation)
+    private static string GetPythonOutputPath(string sourcePath)
     {
-        if (response.IsSuccessStatusCode)
+        var directory = Path.GetDirectoryName(sourcePath) ?? string.Empty;
+        var fileName = Path.GetFileNameWithoutExtension(sourcePath);
+        return Path.Combine(directory, fileName + ".webp");
+    }
+
+    private static void TryDeleteOriginal(string originalPath, string producedPath)
+    {
+        if (originalPath.Equals(producedPath, StringComparison.OrdinalIgnoreCase))
         {
             return;
         }
 
-        var errorMessage = TryExtractErrorMessage(body);
-        var statusText = $"HTTP {(int)response.StatusCode} ({response.ReasonPhrase})";
-        if (!string.IsNullOrWhiteSpace(errorMessage))
-        {
-            statusText += $": {errorMessage}";
-        }
-
-        throw new InvalidOperationException($"Unable to {operation} via Recraft: {statusText}.");
-    }
-
-    private static string? TryExtractErrorMessage(string body)
-    {
-        if (string.IsNullOrWhiteSpace(body))
-        {
-            return null;
-        }
-
         try
         {
-            using var document = JsonDocument.Parse(body);
-            var root = document.RootElement;
-            return TryGetString(root, "error") ?? TryGetString(root, "detail");
+            if (File.Exists(originalPath))
+            {
+                File.Delete(originalPath);
+            }
         }
-        catch (JsonException)
+        catch
         {
-            return null;
+            // Ignore cleanup errors.
         }
     }
 
@@ -578,5 +609,14 @@ internal sealed class ImageOperations
         }
     }
 
-    private sealed record RecraftProcessImageResult(string? ImageUrl, string? Base64Data);
+    private sealed record PythonCliResult(string OutputPath, string? RemoteUrl, string? Message);
+}
+
+internal sealed class RecraftUpscaleOptions
+{
+    public required string PythonExecutablePath { get; init; }
+    public required string ScriptPath { get; init; }
+    public required string ApiToken { get; init; }
+    public string? PythonVersionDescription { get; init; }
+    public string? UpscaleMode { get; init; } = null;
 }
