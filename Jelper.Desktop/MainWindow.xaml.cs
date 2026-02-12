@@ -9,6 +9,8 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Threading;
 using Jelper.Desktop.Infrastructure;
 using Jelper.Desktop.Services;
 using WinForms = System.Windows.Forms;
@@ -38,6 +40,7 @@ public partial class MainWindow : Window, ILogSink
     private DateTimeOffset? _operationStartTimestamp;
     private int _completedFilesInOperation;
     private int _totalFilesInOperation;
+    private readonly DispatcherTimer _etaUpdateTimer;
 
     public MainWindow()
     {
@@ -46,6 +49,12 @@ public partial class MainWindow : Window, ILogSink
         ProcessingFilesList.ItemsSource = _fileProgressItems;
         CancelOperationButton.IsEnabled = false;
         ProgressPanel.Visibility = Visibility.Collapsed;
+
+        _etaUpdateTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromSeconds(1)
+        };
+        _etaUpdateTimer.Tick += (_, _) => RefreshEtaText();
 
         _operationViews = new Dictionary<OperationPanel, UIElement>
         {
@@ -519,6 +528,7 @@ public partial class MainWindow : Window, ILogSink
             _operationCancellation?.Dispose();
             _operationCancellation = null;
             CancelOperationButton.IsEnabled = false;
+            StopEtaTimer();
             SetBusy(false);
 
             if (completedSuccessfully)
@@ -562,6 +572,7 @@ public partial class MainWindow : Window, ILogSink
 
         ProgressPanel.Visibility = Visibility.Visible;
         CancelOperationButton.IsEnabled = true;
+        StartEtaTimer();
     }
 
     private void ApplyProgressUpdate(FileProcessingUpdate update)
@@ -575,6 +586,8 @@ public partial class MainWindow : Window, ILogSink
         {
             case FileProcessingState.Started:
                 item.SetState(FileProcessingDisplayState.Processing);
+                ProcessingFilesList.SelectedItem = item;
+                ProcessingFilesList.ScrollIntoView(item);
                 break;
             case FileProcessingState.Completed:
                 if (item.SetState(FileProcessingDisplayState.Completed))
@@ -612,7 +625,7 @@ public partial class MainWindow : Window, ILogSink
             ? 0
             : (double)completed / total;
 
-        EtaText.Text = GetEtaText(total, completed);
+        RefreshEtaText(total, completed);
     }
 
     private string GetEtaText(int total, int completed)
@@ -638,6 +651,34 @@ public partial class MainWindow : Window, ILogSink
         var remainingSeconds = averageSeconds * remainingFiles;
         var eta = TimeSpan.FromSeconds(Math.Max(0, remainingSeconds));
         return $"Оставшееся время ~{eta:hh\\:mm\\:ss}";
+    }
+
+    private void RefreshEtaText()
+    {
+        var total = Math.Max(_totalFilesInOperation, _fileProgressItems.Count);
+        var completed = Math.Clamp(_completedFilesInOperation, 0, total);
+        RefreshEtaText(total, completed);
+    }
+
+    private void RefreshEtaText(int total, int completed)
+    {
+        EtaText.Text = GetEtaText(total, completed);
+    }
+
+    private void StartEtaTimer()
+    {
+        if (!_etaUpdateTimer.IsEnabled)
+        {
+            _etaUpdateTimer.Start();
+        }
+    }
+
+    private void StopEtaTimer()
+    {
+        if (_etaUpdateTimer.IsEnabled)
+        {
+            _etaUpdateTimer.Stop();
+        }
     }
 
     private FileProcessingItem GetOrCreateFileItem(string filePath)
@@ -670,11 +711,19 @@ public partial class MainWindow : Window, ILogSink
     {
         _isBusy = busy;
         ActionsPanel.IsEnabled = !busy;
-        DetailsCard.IsEnabled = !busy;
+        SetOperationFormsEnabled(!busy);
         ImagesFolderTextBox.IsEnabled = !busy;
         BrowseFolderButton.IsEnabled = !busy;
         StatusTextBlock.Text = status ?? (busy ? "Working..." : "Готов");
         ProgressIndicator.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void SetOperationFormsEnabled(bool enabled)
+    {
+        foreach (var view in _operationViews.Values)
+        {
+            view.IsEnabled = enabled;
+        }
     }
 
     private static bool TryGetPositiveInt(WpfTextBox textBox, string fieldName, out int value)
@@ -725,6 +774,12 @@ public partial class MainWindow : Window, ILogSink
 
     private sealed class FileProcessingItem : INotifyPropertyChanged
     {
+        private static readonly System.Windows.Media.Brush WaitingBrush = CreateBrush(0xF5, 0xF5, 0xF5);
+        private static readonly System.Windows.Media.Brush ProcessingBrush = CreateBrush(0xFF, 0xC4, 0x1A);
+        private static readonly System.Windows.Media.Brush CompletedBrush = CreateBrush(0x6F, 0xD9, 0x92);
+        private static readonly System.Windows.Media.Brush SkippedBrush = CreateBrush(0xB0, 0xB4, 0xC1);
+        private static readonly System.Windows.Media.Brush FailedBrush = CreateBrush(0xF4, 0x5B, 0x69);
+        private static readonly System.Windows.Media.Brush CancelledBrush = CreateBrush(0xFF, 0x9F, 0x43);
         private FileProcessingDisplayState _state = FileProcessingDisplayState.Waiting;
 
         public FileProcessingItem(string filePath)
@@ -746,6 +801,17 @@ public partial class MainWindow : Window, ILogSink
             _ => string.Empty
         };
 
+        public System.Windows.Media.Brush StatusBrush => _state switch
+        {
+            FileProcessingDisplayState.Waiting => WaitingBrush,
+            FileProcessingDisplayState.Processing => ProcessingBrush,
+            FileProcessingDisplayState.Completed => CompletedBrush,
+            FileProcessingDisplayState.Skipped => SkippedBrush,
+            FileProcessingDisplayState.Failed => FailedBrush,
+            FileProcessingDisplayState.Cancelled => CancelledBrush,
+            _ => WaitingBrush
+        };
+
         public bool IsTerminal => _state is FileProcessingDisplayState.Completed
             or FileProcessingDisplayState.Skipped
             or FileProcessingDisplayState.Failed
@@ -760,6 +826,7 @@ public partial class MainWindow : Window, ILogSink
 
             _state = newState;
             OnPropertyChanged(nameof(StatusText));
+            OnPropertyChanged(nameof(StatusBrush));
             return true;
         }
 
@@ -768,6 +835,13 @@ public partial class MainWindow : Window, ILogSink
         private void OnPropertyChanged(string propertyName)
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+        }
+
+        private static System.Windows.Media.SolidColorBrush CreateBrush(byte r, byte g, byte b)
+        {
+            var brush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(r, g, b));
+            brush.Freeze();
+            return brush;
         }
     }
 

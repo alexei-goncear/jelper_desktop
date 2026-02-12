@@ -144,10 +144,14 @@
 
             <Border x:Name="DetailsCard" Grid.Row="3" Background="{StaticResource CardBrush}" CornerRadius="12" Padding="20" Margin="0,20,0,0" BorderBrush="{StaticResource BorderBrushColor}" BorderThickness="1" Visibility="Collapsed">
                 <StackPanel>
-                    <DockPanel>
-                        <TextBlock x:Name="DetailsHeader" FontSize="20" FontWeight="Bold" DockPanel.Dock="Left" />
-                        <Button Content="Закрыть" Width="110" DockPanel.Dock="Right" Click="HideDetailsButton_OnClick" />
-                    </DockPanel>
+                    <Grid HorizontalAlignment="Stretch">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock x:Name="DetailsHeader" FontSize="20" FontWeight="Bold" VerticalAlignment="Center" />
+                        <Button Content="Закрыть" Width="110" Grid.Column="1" HorizontalAlignment="Right" Click="HideDetailsButton_OnClick" />
+                    </Grid>
                     <Separator Margin="0,12,0,16" />
 
                     <Grid>
@@ -259,11 +263,52 @@
                             <TextBlock x:Name="EtaText" Foreground="#B0B4C1" Margin="0,4,0,0" />
                             <ProgressBar x:Name="OverallProgressBar" Height="16" Margin="0,12,0,12" Minimum="0" Maximum="1" />
                             <Border BorderThickness="1" BorderBrush="{StaticResource BorderBrushColor}" CornerRadius="6">
-                                <ListView x:Name="ProcessingFilesList" Background="#0D0F14" BorderThickness="0" Foreground="#F5F5F5" Height="220">
+                                <ListView x:Name="ProcessingFilesList" Background="#0D0F14" BorderThickness="0" Foreground="#F5F5F5" Height="220" ScrollViewer.VerticalScrollBarVisibility="Auto">
+                                    <ListView.Resources>
+                                        <Style TargetType="GridViewColumnHeader">
+                                            <Setter Property="Background" Value="#0D0F14" />
+                                            <Setter Property="Foreground" Value="#F5F5F5" />
+                                            <Setter Property="Padding" Value="8,4" />
+                                            <Setter Property="FontWeight" Value="SemiBold" />
+                                            <Setter Property="BorderBrush" Value="#2A2F3A" />
+                                            <Setter Property="BorderThickness" Value="0,0,0,1" />
+                                        </Style>
+                                    </ListView.Resources>
+                                    <ListView.ItemContainerStyle>
+                                        <Style TargetType="ListViewItem">
+                                            <Setter Property="Background" Value="#0D0F14" />
+                                            <Setter Property="Foreground" Value="#F5F5F5" />
+                                            <Setter Property="BorderThickness" Value="0,0,0,1" />
+                                            <Setter Property="BorderBrush" Value="#1F232C" />
+                                            <Setter Property="Padding" Value="8,4" />
+                                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                            <Style.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter Property="Background" Value="#151922" />
+                                                </Trigger>
+                                                <Trigger Property="IsSelected" Value="True">
+                                                    <Setter Property="Background" Value="#1E2735" />
+                                                    <Setter Property="BorderBrush" Value="#3EA6FF" />
+                                                </Trigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </ListView.ItemContainerStyle>
                                     <ListView.View>
                                         <GridView>
-                                            <GridViewColumn Header="Файл" Width="360" DisplayMemberBinding="{Binding FileName}" />
-                                            <GridViewColumn Header="Статус" Width="160" DisplayMemberBinding="{Binding StatusText}" />
+                                            <GridViewColumn Header="Файл" Width="360">
+                                                <GridViewColumn.CellTemplate>
+                                                    <DataTemplate>
+                                                        <TextBlock Text="{Binding FileName}" />
+                                                    </DataTemplate>
+                                                </GridViewColumn.CellTemplate>
+                                            </GridViewColumn>
+                                            <GridViewColumn Header="Статус" Width="160">
+                                                <GridViewColumn.CellTemplate>
+                                                    <DataTemplate>
+                                                        <TextBlock Text="{Binding StatusText}" Foreground="{Binding StatusBrush}" FontWeight="SemiBold" />
+                                                    </DataTemplate>
+                                                </GridViewColumn.CellTemplate>
+                                            </GridViewColumn>
                                         </GridView>
                                     </ListView.View>
                                 </ListView>
