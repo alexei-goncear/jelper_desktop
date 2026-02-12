@@ -19,39 +19,59 @@ internal sealed class ImageOperations
         _imagesDirectoryProvider = imagesDirectoryProvider;
     }
 
-    public int GetWebpFileCount() => GetFiles("*.webp").Count;
-
     public int GetSupportedImageFileCount() => GetSupportedImageFiles().Count;
 
-    public bool HasWebpFiles() => GetWebpFileCount() > 0;
+    public IReadOnlyList<string> ListSupportedImageFiles() => GetSupportedImageFiles();
+
+    public IReadOnlyList<string> ListFilesByPattern(string searchPattern)
+    {
+        if (string.IsNullOrWhiteSpace(searchPattern))
+        {
+            return Array.Empty<string>();
+        }
+
+        return GetFiles(searchPattern);
+    }
 
     public bool HasSupportedImageFiles() => GetSupportedImageFileCount() > 0;
 
-    public void ConvertWebpToPng()
+    public void ConvertFiles(IReadOnlyList<string> files, string targetExtension, ImageOperationExecutionContext context)
     {
-        var files = GetFiles("*.webp");
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(context);
+
+        if (string.IsNullOrWhiteSpace(targetExtension))
+        {
+            throw new ArgumentException("Target extension is required.", nameof(targetExtension));
+        }
+
         if (files.Count == 0)
         {
-            _log.Info("No WEBP files were found in the selected images folder.");
+            _log.Info("No files were found for conversion in the selected images folder.");
             return;
         }
 
         var converted = 0;
         var total = files.Count;
-        _log.Info($"Found {total} WEBP file(s). Starting conversion...");
+        var targetExtensionDisplay = targetExtension.TrimStart('.').ToUpperInvariant();
+        _log.Info($"Found {total} file(s). Converting to {targetExtensionDisplay}...");
 
         for (var index = 0; index < total; index++)
         {
+            context.CancellationToken.ThrowIfCancellationRequested();
             var file = files[index];
-            var destinationPath = Path.ChangeExtension(file, ".png");
+            var destinationPath = Path.ChangeExtension(file, targetExtension);
             var progress = FormatProgress(index + 1, total);
             var fileName = Path.GetFileName(file);
+
+            ReportProgress(context, file, FileProcessingState.Started, total);
 
             try
             {
                 var existed = File.Exists(destinationPath);
                 using var image = new MagickImage(file);
-                image.Write(destinationPath, MagickFormat.Png);
+                var format = GetFormatForPath(destinationPath);
+                image.Write(destinationPath, format);
                 converted++;
 
                 if (!file.Equals(destinationPath, StringComparison.OrdinalIgnoreCase))
@@ -61,19 +81,23 @@ internal sealed class ImageOperations
 
                 var action = existed ? "Updated" : "Created";
                 _log.Info($"{progress} {action} {Path.GetFileName(destinationPath)} from {fileName}.");
+                ReportProgress(context, file, FileProcessingState.Completed, total);
             }
             catch (Exception ex)
             {
                 _log.Error($"{progress} Failed to convert {fileName}: {ex.Message}");
+                ReportProgress(context, file, FileProcessingState.Failed, total);
             }
         }
 
-        _log.Info($"WEBP conversion finished. Converted {converted} of {total}.");
+        _log.Info($"Conversion finished. Converted {converted} of {total}.");
     }
 
-    public void RemoveWatermark(int pixelsToRemove)
+    public void RemoveWatermark(int pixelsToRemove, IReadOnlyList<string> files, ImageOperationExecutionContext context)
     {
-        var files = GetSupportedImageFiles();
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(context);
+
         if (files.Count == 0)
         {
             _log.Info("No PNG/JPG files were found in the selected images folder.");
@@ -85,9 +109,12 @@ internal sealed class ImageOperations
 
         for (var index = 0; index < total; index++)
         {
+            context.CancellationToken.ThrowIfCancellationRequested();
             var file = files[index];
             var progress = FormatProgress(index + 1, total);
             var fileName = Path.GetFileName(file);
+
+            ReportProgress(context, file, FileProcessingState.Started, total);
 
             try
             {
@@ -95,6 +122,7 @@ internal sealed class ImageOperations
                 if (image.Height <= pixelsToRemove)
                 {
                     _log.Error($"{progress} Cannot trim {pixelsToRemove}px from {fileName} because the image height is {image.Height}px. Skipped.");
+                    ReportProgress(context, file, FileProcessingState.Skipped, total);
                     continue;
                 }
 
@@ -115,19 +143,23 @@ internal sealed class ImageOperations
                 var format = GetFormatForPath(file);
                 image.Write(file, format);
                 _log.Info($"{progress} Updated {fileName} (trimmed {pixelsToRemove}px).");
+                ReportProgress(context, file, FileProcessingState.Completed, total);
             }
             catch (Exception ex)
             {
                 _log.Error($"{progress} Failed to update {fileName}: {ex.Message}");
+                ReportProgress(context, file, FileProcessingState.Failed, total);
             }
         }
 
         _log.Info("Watermark removal finished for all PNG/JPG files.");
     }
 
-    public void ResizeImages(int targetWidth, int targetHeight)
+    public void ResizeImages(int targetWidth, int targetHeight, IReadOnlyList<string> files, ImageOperationExecutionContext context)
     {
-        var files = GetSupportedImageFiles();
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(context);
+
         if (files.Count == 0)
         {
             _log.Info("No PNG/JPG files were found in the selected images folder.");
@@ -139,9 +171,12 @@ internal sealed class ImageOperations
 
         for (var index = 0; index < total; index++)
         {
+            context.CancellationToken.ThrowIfCancellationRequested();
             var file = files[index];
             var progress = FormatProgress(index + 1, total);
             var fileName = Path.GetFileName(file);
+
+            ReportProgress(context, file, FileProcessingState.Started, total);
 
             try
             {
@@ -154,25 +189,29 @@ internal sealed class ImageOperations
                 var format = GetFormatForPath(file);
                 image.Write(file, format);
                 _log.Info($"{progress} Updated {fileName} ({targetWidth}x{targetHeight}).");
+                ReportProgress(context, file, FileProcessingState.Completed, total);
             }
             catch (Exception ex)
             {
                 _log.Error($"{progress} Failed to resize {fileName}: {ex.Message}");
+                ReportProgress(context, file, FileProcessingState.Failed, total);
             }
         }
 
         _log.Info("Resize finished for all PNG/JPG files.");
     }
 
-    public void ResizeAndWatermark(int targetWidth, int targetHeight, string watermarkPath)
+    public void ResizeAndWatermark(int targetWidth, int targetHeight, string watermarkPath, IReadOnlyList<string> files, ImageOperationExecutionContext context)
     {
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(context);
+
         if (!File.Exists(watermarkPath))
         {
             _log.Info($"Watermark file {Path.GetFileName(watermarkPath)} was not found. Nothing to do.");
             return;
         }
 
-        var files = GetSupportedImageFiles();
         if (files.Count == 0)
         {
             _log.Info("No PNG/JPG files were found in the selected images folder.");
@@ -181,6 +220,8 @@ internal sealed class ImageOperations
 
         var watermarkFileName = Path.GetFileName(watermarkPath);
         _log.Info($"Found {files.Count} PNG/JPG file(s). Preparing watermark {watermarkFileName}...");
+
+        context.CancellationToken.ThrowIfCancellationRequested();
 
         MagickImage watermark;
         try
@@ -198,9 +239,12 @@ internal sealed class ImageOperations
             var total = files.Count;
             for (var index = 0; index < total; index++)
             {
+                context.CancellationToken.ThrowIfCancellationRequested();
                 var file = files[index];
                 var progress = FormatProgress(index + 1, total);
                 var fileName = Path.GetFileName(file);
+
+                ReportProgress(context, file, FileProcessingState.Started, total);
 
                 try
                 {
@@ -219,10 +263,12 @@ internal sealed class ImageOperations
                     var format = GetFormatForPath(file);
                     image.Write(file, format);
                     _log.Info($"{progress} Updated {fileName} ({targetWidth}x{targetHeight}, watermark: {watermarkFileName}).");
+                    ReportProgress(context, file, FileProcessingState.Completed, total);
                 }
                 catch (Exception ex)
                 {
                     _log.Error($"{progress} Failed to watermark {fileName}: {ex.Message}");
+                    ReportProgress(context, file, FileProcessingState.Failed, total);
                 }
             }
 
@@ -298,6 +344,11 @@ internal sealed class ImageOperations
     }
 
     private static string FormatProgress(int current, int total) => $"[{current}/{total}]";
+
+    private static void ReportProgress(ImageOperationExecutionContext context, string file, FileProcessingState state, int total)
+    {
+        context.ReportProgress(new FileProcessingUpdate(file, state, total));
+    }
 
     private void TryDeleteSource(string sourcePath, string progress)
     {

@@ -1,9 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using Jelper.Desktop.Infrastructure;
 using Jelper.Desktop.Services;
@@ -18,13 +22,30 @@ namespace Jelper.Desktop;
 public partial class MainWindow : Window, ILogSink
 {
     private readonly ImageOperations _operations;
+    private readonly List<ConversionOption> _conversionOptions = new()
+    {
+        new("WEBP", "*.webp", "PNG", ".png"),
+        new("WEBP", "*.webp", "JPG", ".jpg"),
+        new("JPG", "*.jpg", "PNG", ".png"),
+        new("PNG", "*.png", "JPG", ".jpg")
+    };
     private readonly Dictionary<OperationPanel, UIElement> _operationViews;
     private OperationPanel _activePanel = OperationPanel.None;
     private bool _isBusy;
+    private readonly ObservableCollection<FileProcessingItem> _fileProgressItems = new();
+    private readonly Dictionary<string, FileProcessingItem> _fileProgressLookup = new(StringComparer.OrdinalIgnoreCase);
+    private CancellationTokenSource? _operationCancellation;
+    private DateTimeOffset? _operationStartTimestamp;
+    private int _completedFilesInOperation;
+    private int _totalFilesInOperation;
 
     public MainWindow()
     {
         InitializeComponent();
+
+        ProcessingFilesList.ItemsSource = _fileProgressItems;
+        CancelOperationButton.IsEnabled = false;
+        ProgressPanel.Visibility = Visibility.Collapsed;
 
         _operationViews = new Dictionary<OperationPanel, UIElement>
         {
@@ -35,6 +56,8 @@ public partial class MainWindow : Window, ILogSink
         };
 
         _operations = new ImageOperations(this, GetImagesFolderPath);
+
+        InitializeConversionControls();
 
         var savedPath = UserSettings.LoadImagesFolderPath();
         if (!string.IsNullOrWhiteSpace(savedPath))
@@ -50,20 +73,22 @@ public partial class MainWindow : Window, ILogSink
     private async void ConvertButton_OnClick(object sender, RoutedEventArgs e)
     {
         if (!EnsureImagesFolderSelected() ||
-            !TryGetFileCount(OperationPanel.Convert, out var count) ||
-            !ConfirmOperationCount(count))
+            !TryGetSelectedConversion(out var conversion) ||
+            !TryGetConversionFiles(conversion, out var files) ||
+            !ConfirmOperationCount(files.Count))
         {
             return;
         }
 
-        await RunOperationAsync("Converting WEBP files...", () => _operations.ConvertWebpToPng());
+        var description = $"Конвертация {conversion.SourceLabel} → {conversion.TargetLabel}...";
+        await RunOperationAsync(description, files, ctx => _operations.ConvertFiles(files, conversion.TargetExtension, ctx));
     }
 
     private async void TrimButton_OnClick(object sender, RoutedEventArgs e)
     {
         if (!EnsureImagesFolderSelected() ||
-            !TryGetFileCount(OperationPanel.Trim, out var count) ||
-            !ConfirmOperationCount(count))
+            !TryGetFiles(OperationPanel.Trim, out var files) ||
+            !ConfirmOperationCount(files.Count))
         {
             return;
         }
@@ -73,14 +98,14 @@ public partial class MainWindow : Window, ILogSink
             return;
         }
 
-        await RunOperationAsync($"Removing {pixels}px watermark strip...", () => _operations.RemoveWatermark(pixels));
+        await RunOperationAsync($"Removing {pixels}px watermark strip...", files, ctx => _operations.RemoveWatermark(pixels, files, ctx));
     }
 
     private async void ResizeButton_OnClick(object sender, RoutedEventArgs e)
     {
         if (!EnsureImagesFolderSelected() ||
-            !TryGetFileCount(OperationPanel.Resize, out var count) ||
-            !ConfirmOperationCount(count))
+            !TryGetFiles(OperationPanel.Resize, out var files) ||
+            !ConfirmOperationCount(files.Count))
         {
             return;
         }
@@ -91,14 +116,14 @@ public partial class MainWindow : Window, ILogSink
             return;
         }
 
-        await RunOperationAsync($"Resizing images to {width}x{height}...", () => _operations.ResizeImages(width, height));
+        await RunOperationAsync($"Resizing images to {width}x{height}...", files, ctx => _operations.ResizeImages(width, height, files, ctx));
     }
 
     private async void WatermarkButton_OnClick(object sender, RoutedEventArgs e)
     {
         if (!EnsureImagesFolderSelected() ||
-            !TryGetFileCount(OperationPanel.Watermark, out var count) ||
-            !ConfirmOperationCount(count))
+            !TryGetFiles(OperationPanel.Watermark, out var files) ||
+            !ConfirmOperationCount(files.Count))
         {
             return;
         }
@@ -117,7 +142,8 @@ public partial class MainWindow : Window, ILogSink
         }
 
         await RunOperationAsync($"Resizing and watermarking with {Path.GetFileName(watermarkPath)}...",
-            () => _operations.ResizeAndWatermark(width, height, watermarkPath));
+            files,
+            ctx => _operations.ResizeAndWatermark(width, height, watermarkPath, files, ctx));
     }
 
     private void BrowseFolderButton_OnClick(object sender, RoutedEventArgs e)
@@ -189,6 +215,19 @@ public partial class MainWindow : Window, ILogSink
         LogsOverlay.Visibility = Visibility.Collapsed;
     }
 
+    private void CancelOperationButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_operationCancellation == null || !_isBusy)
+        {
+            return;
+        }
+
+        CancelOperationButton.IsEnabled = false;
+        _operationCancellation.Cancel();
+        AppendLog("Cancellation requested...");
+    }
+
+
     private void ShowOperationPanel(OperationPanel panel)
     {
         foreach (var view in _operationViews)
@@ -215,8 +254,8 @@ public partial class MainWindow : Window, ILogSink
 
     private string GetPanelTitle(OperationPanel panel) => panel switch
     {
-        OperationPanel.Convert => "WEBP → PNG",
-        OperationPanel.Trim => "Удаление полосы",
+        OperationPanel.Convert => "Конвертация",
+        OperationPanel.Trim => "Удаление водяного знака",
         OperationPanel.Resize => "Изменение размера",
         OperationPanel.Watermark => "Размер + водяной знак",
         _ => string.Empty
@@ -271,27 +310,124 @@ public partial class MainWindow : Window, ILogSink
         return BrowseForFolder();
     }
 
-    private bool TryGetFileCount(OperationPanel panel, out int count)
+    private bool TryGetFiles(OperationPanel panel, out IReadOnlyList<string> files)
     {
-        count = panel switch
+        files = panel switch
         {
-            OperationPanel.Convert => _operations.GetWebpFileCount(),
-            _ => _operations.GetSupportedImageFileCount()
+            OperationPanel.Trim => _operations.ListSupportedImageFiles(),
+            OperationPanel.Resize => _operations.ListSupportedImageFiles(),
+            OperationPanel.Watermark => _operations.ListSupportedImageFiles(),
+            _ => throw new InvalidOperationException($"Unsupported panel {panel} for generic file retrieval.")
         };
 
-        if (count > 0)
+        if (files.Count > 0)
         {
             return true;
         }
 
-        var message = panel switch
-        {
-            OperationPanel.Convert => "В выбранной папке нет WEBP файлов.",
-            _ => "В выбранной папке нет PNG/JPG файлов для обработки."
-        };
-
+        const string message = "В выбранной папке нет PNG/JPG файлов для обработки.";
         WpfMessageBox.Show(this, message, "Нет подходящих файлов", MessageBoxButton.OK, MessageBoxImage.Information);
         return false;
+    }
+
+    private bool TryGetConversionFiles(ConversionOption option, out IReadOnlyList<string> files)
+    {
+        files = _operations.ListFilesByPattern(option.SourcePattern);
+        if (files.Count > 0)
+        {
+            return true;
+        }
+
+        WpfMessageBox.Show(this,
+            $"В выбранной папке нет файлов формата {option.SourceLabel}.",
+            "Нет подходящих файлов",
+            MessageBoxButton.OK,
+            MessageBoxImage.Information);
+        return false;
+    }
+
+    private bool TryGetSelectedConversion(out ConversionOption option)
+    {
+        var source = SourceFormatComboBox.SelectedItem as string;
+        var target = TargetFormatComboBox.SelectedItem as string;
+
+        if (string.IsNullOrWhiteSpace(source) || string.IsNullOrWhiteSpace(target))
+        {
+            option = null!;
+            WpfMessageBox.Show(this,
+                "Выберите исходный и целевой форматы.",
+                "Нет формата",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return false;
+        }
+
+        option = _conversionOptions.FirstOrDefault(o =>
+            string.Equals(o.SourceLabel, source, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(o.TargetLabel, target, StringComparison.OrdinalIgnoreCase))!;
+
+        if (option == null)
+        {
+            WpfMessageBox.Show(this,
+                "Выбранная комбинация форматов не поддерживается.",
+                "Неверная комбинация",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return false;
+        }
+
+        return true;
+    }
+
+    private void InitializeConversionControls()
+    {
+        var sources = _conversionOptions
+            .Select(o => o.SourceLabel)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(label => label)
+            .ToList();
+
+        SourceFormatComboBox.ItemsSource = sources;
+        SourceFormatComboBox.SelectedIndex = sources.Count > 0 ? 0 : -1;
+
+        UpdateTargetFormatChoices();
+    }
+
+    private void SourceFormatComboBox_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        UpdateTargetFormatChoices();
+    }
+
+    private void UpdateTargetFormatChoices()
+    {
+        var source = SourceFormatComboBox.SelectedItem as string;
+        List<string> targets;
+
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            targets = new List<string>();
+        }
+        else
+        {
+            targets = _conversionOptions
+                .Where(o => string.Equals(o.SourceLabel, source, StringComparison.OrdinalIgnoreCase))
+                .Select(o => o.TargetLabel)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(label => label)
+                .ToList();
+        }
+
+        var previousTarget = TargetFormatComboBox.SelectedItem as string;
+        TargetFormatComboBox.ItemsSource = targets;
+
+        if (targets.Count == 0)
+        {
+            TargetFormatComboBox.SelectedIndex = -1;
+            return;
+        }
+
+        var matchingIndex = targets.FindIndex(label => string.Equals(label, previousTarget, StringComparison.OrdinalIgnoreCase));
+        TargetFormatComboBox.SelectedIndex = matchingIndex >= 0 ? matchingIndex : 0;
     }
 
     private bool ConfirmOperationCount(int count)
@@ -327,7 +463,7 @@ public partial class MainWindow : Window, ILogSink
         return path;
     }
 
-    private async Task RunOperationAsync(string statusMessage, Action action)
+    private async Task RunOperationAsync(string statusMessage, IReadOnlyList<string> files, Action<ImageOperationExecutionContext> action)
     {
         if (_isBusy)
         {
@@ -335,13 +471,44 @@ public partial class MainWindow : Window, ILogSink
             return;
         }
 
+        if (files.Count == 0)
+        {
+            AppendLog("No files to process.");
+            return;
+        }
+
+        PrepareOperationProgress(statusMessage, files);
         SetBusy(true, statusMessage);
         AppendLog(statusMessage);
 
+        _operationCancellation = new CancellationTokenSource();
+        var context = new ImageOperationExecutionContext
+        {
+            CancellationToken = _operationCancellation.Token,
+            ReportProgress = update => Dispatcher.Invoke(() => ApplyProgressUpdate(update))
+        };
+
+        var completedSuccessfully = false;
+
         try
         {
-            await Task.Run(action);
-            AppendLog("Operation finished.");
+            await Task.Run(() => action(context));
+
+            if (_operationCancellation?.IsCancellationRequested == true)
+            {
+                AppendLog("Operation canceled.");
+                MarkPendingItemsAsCancelled();
+            }
+            else
+            {
+                AppendLog("Operation finished.");
+                completedSuccessfully = true;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            AppendLog("Operation canceled.");
+            MarkPendingItemsAsCancelled();
         }
         catch (Exception ex)
         {
@@ -349,8 +516,154 @@ public partial class MainWindow : Window, ILogSink
         }
         finally
         {
+            _operationCancellation?.Dispose();
+            _operationCancellation = null;
+            CancelOperationButton.IsEnabled = false;
             SetBusy(false);
+
+            if (completedSuccessfully)
+            {
+                Dispatcher.Invoke(() =>
+                {
+                    WpfMessageBox.Show(this,
+                        "Все файлы обработаны.",
+                        "Операция завершена",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+                });
+            }
         }
+    }
+
+    private void PrepareOperationProgress(string description, IReadOnlyList<string> files)
+    {
+        _fileProgressItems.Clear();
+        _fileProgressLookup.Clear();
+
+        foreach (var file in files)
+        {
+            var item = new FileProcessingItem(file);
+            _fileProgressItems.Add(item);
+            _fileProgressLookup[file] = item;
+        }
+
+        _completedFilesInOperation = 0;
+        _totalFilesInOperation = files.Count;
+        _operationStartTimestamp = null;
+
+        CurrentOperationText.Text = description;
+        ProgressSummaryText.Text = _totalFilesInOperation > 0
+            ? $"Обработано 0 из {_totalFilesInOperation}"
+            : "Нет файлов для обработки";
+        EtaText.Text = _totalFilesInOperation > 0
+            ? "ETA появится после обработки первого файла."
+            : string.Empty;
+        OverallProgressBar.Value = 0;
+
+        ProgressPanel.Visibility = Visibility.Visible;
+        CancelOperationButton.IsEnabled = true;
+    }
+
+    private void ApplyProgressUpdate(FileProcessingUpdate update)
+    {
+        _operationStartTimestamp ??= DateTimeOffset.Now;
+        _totalFilesInOperation = Math.Max(_totalFilesInOperation, update.TotalFiles);
+
+        var item = GetOrCreateFileItem(update.FilePath);
+
+        switch (update.State)
+        {
+            case FileProcessingState.Started:
+                item.SetState(FileProcessingDisplayState.Processing);
+                break;
+            case FileProcessingState.Completed:
+                if (item.SetState(FileProcessingDisplayState.Completed))
+                {
+                    _completedFilesInOperation++;
+                }
+                break;
+            case FileProcessingState.Skipped:
+                if (item.SetState(FileProcessingDisplayState.Skipped))
+                {
+                    _completedFilesInOperation++;
+                }
+                break;
+            case FileProcessingState.Failed:
+                if (item.SetState(FileProcessingDisplayState.Failed))
+                {
+                    _completedFilesInOperation++;
+                }
+                break;
+        }
+
+        UpdateProgressSummary();
+    }
+
+    private void UpdateProgressSummary()
+    {
+        var total = Math.Max(_totalFilesInOperation, _fileProgressItems.Count);
+        var completed = Math.Clamp(_completedFilesInOperation, 0, total);
+
+        ProgressSummaryText.Text = total > 0
+            ? $"Обработано {completed} из {total}"
+            : "Нет файлов для обработки";
+
+        OverallProgressBar.Value = total == 0
+            ? 0
+            : (double)completed / total;
+
+        EtaText.Text = GetEtaText(total, completed);
+    }
+
+    private string GetEtaText(int total, int completed)
+    {
+        if (total == 0)
+        {
+            return string.Empty;
+        }
+
+        if (completed == 0 || !_operationStartTimestamp.HasValue)
+        {
+            return "ETA появится после обработки первого файла.";
+        }
+
+        var elapsed = DateTimeOffset.Now - _operationStartTimestamp.Value;
+        if (elapsed.TotalSeconds <= 0)
+        {
+            return "ETA рассчитывается...";
+        }
+
+        var averageSeconds = elapsed.TotalSeconds / completed;
+        var remainingFiles = Math.Max(0, total - completed);
+        var remainingSeconds = averageSeconds * remainingFiles;
+        var eta = TimeSpan.FromSeconds(Math.Max(0, remainingSeconds));
+        return $"Оставшееся время ~{eta:hh\\:mm\\:ss}";
+    }
+
+    private FileProcessingItem GetOrCreateFileItem(string filePath)
+    {
+        if (_fileProgressLookup.TryGetValue(filePath, out var existing))
+        {
+            return existing;
+        }
+
+        var created = new FileProcessingItem(filePath);
+        _fileProgressLookup[filePath] = created;
+        _fileProgressItems.Add(created);
+        return created;
+    }
+
+    private void MarkPendingItemsAsCancelled()
+    {
+        foreach (var item in _fileProgressItems)
+        {
+            if (!item.IsTerminal)
+            {
+                item.SetState(FileProcessingDisplayState.Cancelled);
+            }
+        }
+
+        UpdateProgressSummary();
     }
 
     private void SetBusy(bool busy, string? status = null)
@@ -406,6 +719,66 @@ public partial class MainWindow : Window, ILogSink
             LogTextBox.AppendText($"[{timestamp}] {prefix}{message}{Environment.NewLine}");
             LogTextBox.ScrollToEnd();
         });
+    }
+
+    private sealed record ConversionOption(string SourceLabel, string SourcePattern, string TargetLabel, string TargetExtension);
+
+    private sealed class FileProcessingItem : INotifyPropertyChanged
+    {
+        private FileProcessingDisplayState _state = FileProcessingDisplayState.Waiting;
+
+        public FileProcessingItem(string filePath)
+        {
+            FilePath = filePath;
+        }
+
+        public string FilePath { get; }
+        public string FileName => Path.GetFileName(FilePath);
+
+        public string StatusText => _state switch
+        {
+            FileProcessingDisplayState.Waiting => "В ожидании",
+            FileProcessingDisplayState.Processing => "В процессе",
+            FileProcessingDisplayState.Completed => "Готово",
+            FileProcessingDisplayState.Skipped => "Пропущено",
+            FileProcessingDisplayState.Failed => "Ошибка",
+            FileProcessingDisplayState.Cancelled => "Отменено",
+            _ => string.Empty
+        };
+
+        public bool IsTerminal => _state is FileProcessingDisplayState.Completed
+            or FileProcessingDisplayState.Skipped
+            or FileProcessingDisplayState.Failed
+            or FileProcessingDisplayState.Cancelled;
+
+        public bool SetState(FileProcessingDisplayState newState)
+        {
+            if (_state == newState)
+            {
+                return false;
+            }
+
+            _state = newState;
+            OnPropertyChanged(nameof(StatusText));
+            return true;
+        }
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+
+        private void OnPropertyChanged(string propertyName)
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+        }
+    }
+
+    private enum FileProcessingDisplayState
+    {
+        Waiting,
+        Processing,
+        Completed,
+        Skipped,
+        Failed,
+        Cancelled
     }
 
     private enum OperationPanel
