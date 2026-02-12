@@ -1,3 +1,8 @@
 <Solution>
+  <Folder Name="/Replicate/">
+    <File Path="Replicate/README.md" />
+    <File Path="Replicate/recraft_cli.py" />
+    <File Path="Replicate/requirements.txt" />
+  </Folder>
   <Project Path="Jelper.Desktop/Jelper.Desktop.csproj" />
 </Solution>
