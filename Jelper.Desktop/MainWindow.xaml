@@ -117,25 +117,25 @@
                 <UniformGrid x:Name="ActionsPanel" Columns="4" Rows="1" Margin="0,4,0,0">
                     <Button Style="{StaticResource IconActionButtonStyle}" Tag="Convert" Click="ActionShortcut_OnClick" ToolTip="Конвертация WEBP в PNG">
                         <StackPanel>
-                            <TextBlock Text="&#xE77B;" FontFamily="Segoe MDL2 Assets" FontSize="32" HorizontalAlignment="Center" />
+                            <TextBlock Text="&#xE8AB;" FontFamily="Segoe MDL2 Assets" FontSize="32" HorizontalAlignment="Center" />
                             <TextBlock Text="Конвертация" HorizontalAlignment="Center" Margin="0,6,0,0" />
                         </StackPanel>
                     </Button>
                     <Button Style="{StaticResource IconActionButtonStyle}" Tag="Trim" Click="ActionShortcut_OnClick" ToolTip="Удалить нижний водяной знак">
                         <StackPanel>
-                            <TextBlock Text="&#xE8FD;" FontFamily="Segoe MDL2 Assets" FontSize="32" HorizontalAlignment="Center" />
+                            <TextBlock Text="&#xE711;" FontFamily="Segoe MDL2 Assets" FontSize="32" HorizontalAlignment="Center" />
                             <TextBlock Text="Обрезать водяной знак" HorizontalAlignment="Center" Margin="0,6,0,0" />
                         </StackPanel>
                     </Button>
                     <Button Style="{StaticResource IconActionButtonStyle}" Tag="Resize" Click="ActionShortcut_OnClick" ToolTip="Принудительное изменение размера">
                         <StackPanel>
-                            <TextBlock Text="&#xE8D7;" FontFamily="Segoe MDL2 Assets" FontSize="32" HorizontalAlignment="Center" />
+                            <TextBlock Text="&#xE740;" FontFamily="Segoe MDL2 Assets" FontSize="32" HorizontalAlignment="Center" />
                             <TextBlock Text="Изменить размер" HorizontalAlignment="Center" Margin="0,6,0,0" />
                         </StackPanel>
                     </Button>
                     <Button Style="{StaticResource IconActionButtonStyle}" Tag="Watermark" Click="ActionShortcut_OnClick" ToolTip="Изменить размер и добавить водяной знак">
                         <StackPanel>
-                            <TextBlock Text="&#xE7BA;" FontFamily="Segoe MDL2 Assets" FontSize="32" HorizontalAlignment="Center" />
+                            <TextBlock Text="&#xE734;" FontFamily="Segoe MDL2 Assets" FontSize="32" HorizontalAlignment="Center" />
                             <TextBlock Text="Размер + водяной знак" TextAlignment="Center" Margin="0,6,0,0" />
                         </StackPanel>
                     </Button>
