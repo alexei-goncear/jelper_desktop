@@ -6,3 +6,5 @@
 /Jelper.Desktop/bin
 /Jelper.Desktop/obj
 *.user
+/Replicate/__pycache__
+/Replicate/.vscode
