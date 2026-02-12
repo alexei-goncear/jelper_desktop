@@ -7,10 +7,19 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationIcon>jelper.ico</ApplicationIcon>
+    <AssemblyName>Jelper</AssemblyName>
+    <RootNamespace>Jelper.Desktop</RootNamespace>
+    <AssemblyTitle>Jelper</AssemblyTitle>
+    <Product>Jelper</Product>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Magick.NET-Q16-AnyCPU" Version="13.6.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="jelper.ico" />
   </ItemGroup>
 
 </Project>
