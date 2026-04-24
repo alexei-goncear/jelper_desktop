@@ -21,7 +21,7 @@ internal sealed class ImageOperations
     private const string ReplicateApiTokenEnvVar = "REPLICATE_API_TOKEN";
     private const string OpenAiApiKeyEnvVar = "OPENAI_API_KEY";
     private const string LightXUploadUrlApi = "https://api.lightxeditor.com/external/api/v2/uploadImageUrl";
-    private const string LightXCleanupApi = "https://api.lightxeditor.com/external/api/v2/ai-cleanup-picture/";
+    private const string LightXCleanupApi = "https://api.lightxeditor.com/external/api/v2/cleanup-picture";
     private const string LightXOrderStatusApi = "https://api.lightxeditor.com/external/api/v2/order-status";
     private readonly ILogSink _log;
     private readonly Func<string> _imagesDirectoryProvider;
@@ -747,7 +747,7 @@ internal sealed class ImageOperations
         var payload = new
         {
             imageUrl,
-            maskImageUrl
+            maskedImageUrl = maskImageUrl
         };
 
         using var request = CreateLightXJsonRequest(HttpMethod.Post, LightXCleanupApi, apiKey, payload);
@@ -843,7 +843,8 @@ internal sealed class ImageOperations
     private static HttpRequestMessage CreateLightXJsonRequest(HttpMethod method, string url, string apiKey, object payload)
     {
         var request = new HttpRequestMessage(method, url);
-        request.Headers.Add("x-api-key", apiKey);
+        request.Headers.TryAddWithoutValidation("x-api-key", apiKey.Trim());
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         request.Content = new StringContent(JsonSerializer.Serialize(payload));
         request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
         return request;
