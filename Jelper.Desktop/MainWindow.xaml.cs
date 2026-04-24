@@ -48,6 +48,7 @@ public partial class MainWindow : Window, ILogSink
     private DateTimeOffset? _operationStartTimestamp;
     private int _completedFilesInOperation;
     private int _totalFilesInOperation;
+    private bool _canCloseProgressPanel;
     private readonly DispatcherTimer _etaUpdateTimer;
     private DateTimeOffset? _currentFileStartTimestamp;
     private double _lastAverageSeconds;
@@ -412,6 +413,12 @@ public partial class MainWindow : Window, ILogSink
 
     private void CancelOperationButton_OnClick(object sender, RoutedEventArgs e)
     {
+        if (_canCloseProgressPanel)
+        {
+            ProgressPanel.Visibility = Visibility.Collapsed;
+            return;
+        }
+
         if (_operationCancellation == null || !_isBusy)
         {
             return;
@@ -719,10 +726,9 @@ public partial class MainWindow : Window, ILogSink
         {
             _operationCancellation?.Dispose();
             _operationCancellation = null;
-            CancelOperationButton.IsEnabled = false;
             StopEtaTimer();
-            ProgressPanel.Visibility = Visibility.Collapsed;
             SetBusy(false);
+            SetProgressPanelClosable(true);
 
             if (completedSuccessfully)
             {
@@ -755,6 +761,7 @@ public partial class MainWindow : Window, ILogSink
         _operationStartTimestamp = null;
         _currentFileStartTimestamp = null;
         _lastAverageSeconds = 0;
+        _canCloseProgressPanel = false;
 
         CurrentOperationText.Text = description;
         ProgressSummaryText.Text = _totalFilesInOperation > 0
@@ -766,7 +773,7 @@ public partial class MainWindow : Window, ILogSink
         OverallProgressBar.Value = 0;
 
         ProgressPanel.Visibility = Visibility.Visible;
-        CancelOperationButton.IsEnabled = true;
+        SetProgressPanelClosable(false);
         StartEtaTimer();
     }
 
@@ -947,6 +954,13 @@ public partial class MainWindow : Window, ILogSink
         BrowseFolderButton.IsEnabled = !busy;
         StatusTextBlock.Text = status ?? (busy ? "Working..." : "Готов");
         ProgressIndicator.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void SetProgressPanelClosable(bool closable)
+    {
+        _canCloseProgressPanel = closable;
+        CancelOperationButton.Content = closable ? "Закрыть" : "Отменить";
+        CancelOperationButton.IsEnabled = true;
     }
 
     private void SetOperationFormsEnabled(bool enabled)

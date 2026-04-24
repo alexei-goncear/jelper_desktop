@@ -695,6 +695,14 @@ internal sealed class ImageOperations
                 cleanupResult.OutputUrl,
                 $"order_id={cleanupOrder.OrderId}, status={cleanupResult.Status}, retries={cleanupOrder.MaxRetriesAllowed}");
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"LightX cleanup failed: {ex.Message}", ex);
+        }
         finally
         {
             if (!string.IsNullOrWhiteSpace(maskPath))
