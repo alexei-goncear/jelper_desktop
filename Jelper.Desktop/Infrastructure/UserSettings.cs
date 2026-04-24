@@ -12,6 +12,7 @@ internal static class UserSettings
     private static readonly string ImagesPathFile = Path.Combine(SettingsFolder, "images-path.txt");
     private static readonly string ReplicateTokenFile = Path.Combine(SettingsFolder, "replicate-token.txt");
     private static readonly string OpenAiApiKeyFile = Path.Combine(SettingsFolder, "openai-api-key.txt");
+    private static readonly string LightXApiKeyFile = Path.Combine(SettingsFolder, "lightx-api-key.txt");
     private static readonly string GptPromptFile = Path.Combine(SettingsFolder, "gpt-prompt.txt");
 
     public static string? LoadImagesFolderPath()
@@ -123,6 +124,45 @@ internal static class UserSettings
             else
             {
                 File.WriteAllText(OpenAiApiKeyFile, apiKey);
+            }
+        }
+        catch
+        {
+            // Ignore persistence errors.
+        }
+    }
+
+    public static string? LoadLightXApiKey()
+    {
+        try
+        {
+            if (!File.Exists(LightXApiKeyFile))
+            {
+                return null;
+            }
+
+            var content = File.ReadAllText(LightXApiKeyFile).Trim();
+            return string.IsNullOrEmpty(content) ? null : content;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public static void SaveLightXApiKey(string? apiKey)
+    {
+        try
+        {
+            Directory.CreateDirectory(SettingsFolder);
+
+            if (string.IsNullOrWhiteSpace(apiKey))
+            {
+                File.WriteAllText(LightXApiKeyFile, string.Empty);
+            }
+            else
+            {
+                File.WriteAllText(LightXApiKeyFile, apiKey);
             }
         }
         catch

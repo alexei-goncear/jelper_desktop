@@ -70,6 +70,7 @@ public partial class MainWindow : Window, ILogSink
         {
             { OperationPanel.RecraftUpscale, RecraftUpscaleForm },
             { OperationPanel.GptImageEdit, GptImageEditForm },
+            { OperationPanel.LightXWatermarkRemover, LightXWatermarkRemoverForm },
             { OperationPanel.Convert, ConvertForm },
             { OperationPanel.Trim, TrimForm },
             { OperationPanel.Resize, ResizeForm },
@@ -90,6 +91,12 @@ public partial class MainWindow : Window, ILogSink
         if (!string.IsNullOrWhiteSpace(savedOpenAiApiKey))
         {
             OpenAiApiKeyBox.Password = savedOpenAiApiKey;
+        }
+
+        var savedLightXApiKey = UserSettings.LoadLightXApiKey();
+        if (!string.IsNullOrWhiteSpace(savedLightXApiKey))
+        {
+            LightXApiKeyBox.Password = savedLightXApiKey;
         }
 
         var savedGptPrompt = UserSettings.LoadGptPrompt();
@@ -293,6 +300,29 @@ public partial class MainWindow : Window, ILogSink
             ctx => _operations.EditWithGptAsync(files, ctx, options));
     }
 
+    private async void LightXWatermarkRemoverButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (!EnsureImagesFolderSelected() ||
+            !TryGetFiles(OperationPanel.LightXWatermarkRemover, out var files) ||
+            !ConfirmOperationCount(files.Count))
+        {
+            return;
+        }
+
+        var apiKey = GetLightXApiKey();
+        if (apiKey == null)
+        {
+            WpfMessageBox.Show(this, "Введите API key LightX, чтобы продолжить.", "API key не указан", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        UserSettings.SaveLightXApiKey(apiKey);
+
+        await RunOperationAsync("LightX cleanup in progress...",
+            files,
+            ctx => _operations.CleanupWithLightXAsync(files, ctx, apiKey));
+    }
+
     private void BrowseFolderButton_OnClick(object sender, RoutedEventArgs e)
     {
         BrowseForFolder();
@@ -422,6 +452,7 @@ public partial class MainWindow : Window, ILogSink
         OperationPanel.Convert => "Конвертация",
         OperationPanel.RecraftUpscale => "Recraft Upscale",
         OperationPanel.GptImageEdit => "GPT",
+        OperationPanel.LightXWatermarkRemover => "LightX Cleanup",
         OperationPanel.Trim => "Удаление водяного знака",
         OperationPanel.Resize => "Изменение размера",
         OperationPanel.Watermark => "Размер + водяной знак",
@@ -483,6 +514,7 @@ public partial class MainWindow : Window, ILogSink
         {
             OperationPanel.RecraftUpscale => _operations.ListSupportedImageFiles(),
             OperationPanel.GptImageEdit => _operations.ListSupportedImageFiles(),
+            OperationPanel.LightXWatermarkRemover => _operations.ListSupportedImageFiles(),
             OperationPanel.Trim => _operations.ListSupportedImageFiles(),
             OperationPanel.Resize => _operations.ListSupportedImageFiles(),
             OperationPanel.Watermark => _operations.ListSupportedImageFiles(),
@@ -973,6 +1005,12 @@ public partial class MainWindow : Window, ILogSink
         return string.IsNullOrWhiteSpace(value) ? null : value;
     }
 
+    private string? GetLightXApiKey()
+    {
+        var value = LightXApiKeyBox.Password?.Trim();
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
     private string? GetGptPrompt()
     {
         var value = GptPromptTextBox.Text?.Trim();
@@ -1188,6 +1226,7 @@ public partial class MainWindow : Window, ILogSink
         None,
         RecraftUpscale,
         GptImageEdit,
+        LightXWatermarkRemover,
         Convert,
         Trim,
         Resize,

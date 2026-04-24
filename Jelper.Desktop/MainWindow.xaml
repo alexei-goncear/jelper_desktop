@@ -122,17 +122,23 @@
             </Border>
 
             <Border Grid.Row="2" Background="{StaticResource CardBrush}" CornerRadius="10" Padding="16" Margin="0,20,0,0" BorderBrush="{StaticResource BorderBrushColor}" BorderThickness="1">
-                <UniformGrid x:Name="ActionsPanel" Columns="6" Rows="1" Margin="0,4,0,0">
+                <UniformGrid x:Name="ActionsPanel" Columns="7" Rows="1" Margin="0,4,0,0">
                     <Button Style="{StaticResource IconActionButtonStyle}" Tag="RecraftUpscale" Click="ActionShortcut_OnClick" ToolTip="Улучшить качество через Recraft API">
                         <StackPanel>
                             <TextBlock Text="&#xE777;" FontFamily="Segoe MDL2 Assets" FontSize="32" HorizontalAlignment="Center" />
                             <TextBlock Text="Recraft Upscale" TextAlignment="Center" Margin="0,6,0,0" />
                         </StackPanel>
                     </Button>
-                    <Button Style="{StaticResource IconActionButtonStyle}" Tag="GptImageEdit" Click="ActionShortcut_OnClick" ToolTip="Применить общий промпт ко всем PNG/JPG через ChatGPT API">
+                    <!--<Button Style="{StaticResource IconActionButtonStyle}" Tag="GptImageEdit" Click="ActionShortcut_OnClick" ToolTip="Применить общий промпт ко всем PNG/JPG через ChatGPT API">
                         <StackPanel>
                             <TextBlock Text="&#xE8A5;" FontFamily="Segoe MDL2 Assets" FontSize="32" HorizontalAlignment="Center" />
                             <TextBlock Text="GPT" TextAlignment="Center" Margin="0,6,0,0" />
+                        </StackPanel>
+                    </Button>-->
+                    <Button Style="{StaticResource IconActionButtonStyle}" Tag="LightXWatermarkRemover" Click="ActionShortcut_OnClick" ToolTip="Удалить нижний правый участок через LightX AI Cleanup и автоматически сгенерированную маску">
+                        <StackPanel>
+                            <TextBlock Text="&#xE7B8;" FontFamily="Segoe MDL2 Assets" FontSize="32" HorizontalAlignment="Center" />
+                            <TextBlock Text="LightX Ватермарка" TextAlignment="Center" TextWrapping="Wrap" Margin="0,6,0,0" />
                         </StackPanel>
                     </Button>
                     <Button Style="{StaticResource IconActionButtonStyle}" Tag="Convert" Click="ActionShortcut_OnClick" ToolTip="Конвертация WEBP в PNG">
@@ -217,6 +223,19 @@
                                     <Run Text="." />
                                 </TextBlock>
                                 <Button Content="Запустить GPT" Height="40" Margin="0,16,0,0" Click="GptImageEditButton_OnClick" />
+                            </StackPanel>
+                        </Grid>
+
+                        <Grid x:Name="LightXWatermarkRemoverForm" Visibility="Collapsed">
+                            <StackPanel>
+                                <TextBlock Text="Пакетная очистка всех PNG/JPG через LightX AI Cleanup. Для каждого файла приложение само создаст временную маску: прямоугольник внизу справа, затем удалит ее после обработки. LightX возвращает результат в JPEG." TextWrapping="Wrap" Foreground="#B0B4C1" />
+                                <TextBlock Text="Введите API key LightX (LIGHTX_API_KEY)." Margin="0,12,0,0" />
+                                <PasswordBox x:Name="LightXApiKeyBox"
+                                             Margin="0,6,0,0"
+                                             ToolTip="LightX API key"
+                                             HorizontalAlignment="Left"
+                                             Width="320" />
+                                <Button Content="Запустить LightX Cleanup" Height="40" Margin="0,16,0,0" Click="LightXWatermarkRemoverButton_OnClick" />
                             </StackPanel>
                         </Grid>
 

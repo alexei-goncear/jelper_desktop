@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -14,9 +16,13 @@ namespace Jelper.Desktop.Services;
 internal sealed class ImageOperations
 {
     private static readonly string[] SupportedImagePatterns = { "*.png", "*.jpg", "*.jpeg" };
+    private static readonly HttpClient HttpClient = CreateHttpClient();
     private const string RecraftDefaultUpscaleMode = "upscale16mp";
     private const string ReplicateApiTokenEnvVar = "REPLICATE_API_TOKEN";
     private const string OpenAiApiKeyEnvVar = "OPENAI_API_KEY";
+    private const string LightXUploadUrlApi = "https://api.lightxeditor.com/external/api/v2/uploadImageUrl";
+    private const string LightXCleanupApi = "https://api.lightxeditor.com/external/api/v2/ai-cleanup-picture/";
+    private const string LightXOrderStatusApi = "https://api.lightxeditor.com/external/api/v2/order-status";
     private readonly ILogSink _log;
     private readonly Func<string> _imagesDirectoryProvider;
 
@@ -470,6 +476,73 @@ internal sealed class ImageOperations
         _log.Info("GPT image edit finished for all PNG/JPG files.");
     }
 
+    public async Task CleanupWithLightXAsync(IReadOnlyList<string> files, ImageOperationExecutionContext context, string apiKey)
+    {
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentException.ThrowIfNullOrWhiteSpace(apiKey);
+
+        if (files.Count == 0)
+        {
+            _log.Info("No PNG/JPG files were found in the selected images folder.");
+            return;
+        }
+
+        var total = files.Count;
+        _log.Info($"Found {total} PNG/JPG file(s). Cleaning via LightX AI Cleanup...");
+
+        for (var index = 0; index < total; index++)
+        {
+            context.CancellationToken.ThrowIfCancellationRequested();
+            var file = files[index];
+            var progress = FormatProgress(index + 1, total);
+            var fileName = Path.GetFileName(file);
+            var outputPath = GetLightXOutputPath(file);
+
+            ReportProgress(context, file, FileProcessingState.Started, total);
+
+            try
+            {
+                var result = await RunLightXCleanupAsync(file, outputPath, apiKey, context.CancellationToken);
+                var producedPath = result.OutputPath;
+
+                if (!File.Exists(producedPath))
+                {
+                    throw new InvalidOperationException("LightX did not produce an output file.");
+                }
+
+                var finalPath = GetLightXFinalPath(file);
+                if (!producedPath.Equals(finalPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    File.Move(producedPath, finalPath, true);
+                    producedPath = finalPath;
+                }
+
+                TryDeleteOriginal(file, producedPath);
+
+                if (!string.IsNullOrWhiteSpace(result.RemoteUrl))
+                {
+                    _log.Info($"{progress} CDN URL: {result.RemoteUrl}");
+                }
+
+                var extra = string.IsNullOrWhiteSpace(result.Message) ? string.Empty : $" ({result.Message})";
+                _log.Info($"{progress} Cleaned via LightX AI Cleanup{extra}. New file: {producedPath}");
+                ReportProgress(context, file, FileProcessingState.Completed, total);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"{progress} Failed to clean {fileName}: {ex.Message}");
+                ReportProgress(context, file, FileProcessingState.Failed, total, ex.Message);
+            }
+        }
+
+        _log.Info("LightX AI Cleanup finished for all PNG/JPG files.");
+    }
+
     private async Task<PythonCliResult> RunPythonUpscaleAsync(string inputPath, string outputPath, string token, RecraftUpscaleOptions options, CancellationToken cancellationToken)
     {
         var startInfo = new ProcessStartInfo
@@ -598,6 +671,242 @@ internal sealed class ImageOperations
         return ParsePythonCliResult(payload);
     }
 
+    private async Task<PythonCliResult> RunLightXCleanupAsync(string inputPath, string outputPath, string apiKey, CancellationToken cancellationToken)
+    {
+        string? maskPath = null;
+
+        try
+        {
+            maskPath = CreateLightXMask(inputPath);
+
+            var imageUpload = await RequestLightXUploadAsync(inputPath, apiKey, cancellationToken);
+            await UploadFileToLightXAsync(imageUpload.UploadImageUrl, inputPath, cancellationToken);
+
+            var maskUpload = await RequestLightXUploadAsync(maskPath, apiKey, cancellationToken);
+            await UploadFileToLightXAsync(maskUpload.UploadImageUrl, maskPath, cancellationToken);
+
+            var cleanupOrder = await StartLightXCleanupAsync(imageUpload.ImageUrl, maskUpload.ImageUrl, apiKey, cancellationToken);
+            var cleanupResult = await PollLightXOrderAsync(cleanupOrder.OrderId, cleanupOrder.MaxRetriesAllowed, apiKey, cancellationToken);
+
+            await DownloadFileAsync(cleanupResult.OutputUrl, outputPath, cancellationToken);
+
+            return new PythonCliResult(
+                outputPath,
+                cleanupResult.OutputUrl,
+                $"order_id={cleanupOrder.OrderId}, status={cleanupResult.Status}, retries={cleanupOrder.MaxRetriesAllowed}");
+        }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(maskPath))
+            {
+                TryDeleteFile(maskPath);
+            }
+        }
+    }
+
+    private async Task<LightXUploadTicket> RequestLightXUploadAsync(string filePath, string apiKey, CancellationToken cancellationToken)
+    {
+        var payload = new
+        {
+            uploadType = "imageUrl",
+            size = new FileInfo(filePath).Length,
+            contentType = GetMimeTypeForPath(filePath)
+        };
+
+        using var request = CreateLightXJsonRequest(HttpMethod.Post, LightXUploadUrlApi, apiKey, payload);
+        using var response = await HttpClient.SendAsync(request, cancellationToken);
+        using var root = await ReadLightXJsonAsync(response, cancellationToken);
+        var body = GetLightXBody(root.RootElement);
+
+        var uploadImageUrl = GetRequiredString(body, "uploadImage");
+        var imageUrl = GetRequiredString(body, "imageUrl");
+        return new LightXUploadTicket(uploadImageUrl, imageUrl);
+    }
+
+    private async Task UploadFileToLightXAsync(string uploadUrl, string filePath, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Put, uploadUrl);
+        var bytes = await File.ReadAllBytesAsync(filePath, cancellationToken);
+        request.Content = new ByteArrayContent(bytes);
+        request.Content.Headers.ContentType = new MediaTypeHeaderValue(GetMimeTypeForPath(filePath));
+
+        using var response = await HttpClient.SendAsync(request, cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken, "LightX upload failed");
+    }
+
+    private async Task<LightXCleanupOrder> StartLightXCleanupAsync(string imageUrl, string maskImageUrl, string apiKey, CancellationToken cancellationToken)
+    {
+        var payload = new
+        {
+            imageUrl,
+            maskImageUrl
+        };
+
+        using var request = CreateLightXJsonRequest(HttpMethod.Post, LightXCleanupApi, apiKey, payload);
+        using var response = await HttpClient.SendAsync(request, cancellationToken);
+        using var root = await ReadLightXJsonAsync(response, cancellationToken);
+        var body = GetLightXBody(root.RootElement);
+
+        var orderId = GetRequiredString(body, "orderId");
+        var maxRetriesAllowed = TryGetInt32(body, "maxRetriesAllowed") ?? 5;
+        return new LightXCleanupOrder(orderId, Math.Max(1, maxRetriesAllowed));
+    }
+
+    private async Task<LightXCleanupResult> PollLightXOrderAsync(string orderId, int maxRetriesAllowed, string apiKey, CancellationToken cancellationToken)
+    {
+        var lastStatus = "init";
+
+        for (var attempt = 0; attempt < maxRetriesAllowed; attempt++)
+        {
+            if (attempt > 0)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken);
+            }
+
+            using var request = CreateLightXJsonRequest(HttpMethod.Post, LightXOrderStatusApi, apiKey, new { orderId });
+            using var response = await HttpClient.SendAsync(request, cancellationToken);
+            using var root = await ReadLightXJsonAsync(response, cancellationToken);
+            var body = GetLightXBody(root.RootElement);
+
+            var status = TryGetString(body, "status");
+            if (!string.IsNullOrWhiteSpace(status))
+            {
+                lastStatus = status;
+            }
+
+            if (string.Equals(lastStatus, "active", StringComparison.OrdinalIgnoreCase))
+            {
+                var outputUrl = GetRequiredString(body, "output");
+                return new LightXCleanupResult(lastStatus, outputUrl);
+            }
+
+            if (string.Equals(lastStatus, "failed", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("LightX AI Cleanup marked the order as failed.");
+            }
+        }
+
+        throw new InvalidOperationException($"LightX AI Cleanup did not finish in time. Last status: {lastStatus}.");
+    }
+
+    private async Task DownloadFileAsync(string url, string outputPath, CancellationToken cancellationToken)
+    {
+        using var response = await HttpClient.GetAsync(url, cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken, "Failed to download LightX output");
+
+        await using var inputStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        await using var outputStream = new FileStream(outputPath, FileMode.Create, FileAccess.Write, FileShare.None);
+        await inputStream.CopyToAsync(outputStream, cancellationToken);
+    }
+
+    private static string CreateLightXMask(string inputPath)
+    {
+        using var source = new MagickImage(inputPath);
+
+        using var mask = new MagickImage(MagickColors.Black, source.Width, source.Height);
+        mask.ColorType = ColorType.Grayscale;
+
+        const double percent = 0.0833;
+
+        var rectWidth = Math.Max(1, (int)Math.Round(source.Width * percent));
+        var rectHeight = Math.Max(1, (int)Math.Round(source.Height * percent));
+
+        var x = source.Width - rectWidth;
+        var y = source.Height - rectHeight;
+
+        using var pixels = mask.GetPixels();
+
+        var white = new ushort[] { Quantum.Max };
+
+        for (var py = y; py < y + rectHeight && py < source.Height; py++)
+        {
+            for (var px = x; px < x + rectWidth && px < source.Width; px++)
+            {
+                pixels.SetPixel(px, py, white);
+            }
+        }
+
+        var maskPath = Path.Combine(Path.GetTempPath(), $"jelper-mask-{Guid.NewGuid():N}.png");
+        mask.Write(maskPath, MagickFormat.Png);
+
+        return maskPath;
+    }
+
+    private static HttpRequestMessage CreateLightXJsonRequest(HttpMethod method, string url, string apiKey, object payload)
+    {
+        var request = new HttpRequestMessage(method, url);
+        request.Headers.Add("x-api-key", apiKey);
+        request.Content = new StringContent(JsonSerializer.Serialize(payload));
+        request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+        return request;
+    }
+
+    private static async Task<JsonDocument> ReadLightXJsonAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        var content = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"{response.RequestMessage?.RequestUri} returned {(int)response.StatusCode}: {content}");
+        }
+
+        try
+        {
+            return JsonDocument.Parse(content);
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException($"LightX returned invalid JSON: {ex.Message}");
+        }
+    }
+
+    private static JsonElement GetLightXBody(JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("body", out var body) || body.ValueKind != JsonValueKind.Object)
+        {
+            var message = TryGetString(root, "message") ?? "LightX response did not include body.";
+            throw new InvalidOperationException(message);
+        }
+
+        return body;
+    }
+
+    private static string GetRequiredString(JsonElement element, string propertyName)
+    {
+        var value = TryGetString(element, propertyName);
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new InvalidOperationException($"LightX response did not include {propertyName}.");
+        }
+
+        return value;
+    }
+
+    private static int? TryGetInt32(JsonElement element, string propertyName)
+    {
+        if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(propertyName, out var value))
+        {
+            return null;
+        }
+
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var intValue))
+        {
+            return intValue;
+        }
+
+        return null;
+    }
+
+    private static async Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken cancellationToken, string prefix)
+    {
+        if (response.IsSuccessStatusCode)
+        {
+            return;
+        }
+
+        var content = await response.Content.ReadAsStringAsync(cancellationToken);
+        throw new InvalidOperationException($"{prefix}: {(int)response.StatusCode} {response.ReasonPhrase}. {content}");
+    }
+
     private static PythonCliResult ParsePythonCliResult(string payload)
     {
         try
@@ -658,6 +967,20 @@ internal sealed class ImageOperations
     }
 
     private static string GetGptFinalPath(string sourcePath) => sourcePath;
+
+    private static string GetLightXOutputPath(string sourcePath)
+    {
+        var directory = Path.GetDirectoryName(sourcePath) ?? string.Empty;
+        var fileName = Path.GetFileNameWithoutExtension(sourcePath);
+        return Path.Combine(directory, fileName + ".lightx-temp.jpg");
+    }
+
+    private static string GetLightXFinalPath(string sourcePath)
+    {
+        var directory = Path.GetDirectoryName(sourcePath) ?? string.Empty;
+        var fileName = Path.GetFileNameWithoutExtension(sourcePath);
+        return Path.Combine(directory, fileName + ".jpg");
+    }
 
     private static void TryDeleteOriginal(string originalPath, string producedPath)
     {
@@ -778,7 +1101,34 @@ internal sealed class ImageOperations
         }
     }
 
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+            // Ignore temp cleanup errors.
+        }
+    }
+
+    private static HttpClient CreateHttpClient()
+    {
+        var client = new HttpClient
+        {
+            Timeout = TimeSpan.FromSeconds(100)
+        };
+        return client;
+    }
+
     private sealed record PythonCliResult(string OutputPath, string? RemoteUrl, string? Message);
+    private sealed record LightXUploadTicket(string UploadImageUrl, string ImageUrl);
+    private sealed record LightXCleanupOrder(string OrderId, int MaxRetriesAllowed);
+    private sealed record LightXCleanupResult(string Status, string OutputUrl);
 }
 
 internal sealed class RecraftUpscaleOptions
