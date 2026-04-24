@@ -11,6 +11,8 @@ internal static class UserSettings
 
     private static readonly string ImagesPathFile = Path.Combine(SettingsFolder, "images-path.txt");
     private static readonly string ReplicateTokenFile = Path.Combine(SettingsFolder, "replicate-token.txt");
+    private static readonly string OpenAiApiKeyFile = Path.Combine(SettingsFolder, "openai-api-key.txt");
+    private static readonly string GptPromptFile = Path.Combine(SettingsFolder, "gpt-prompt.txt");
 
     public static string? LoadImagesFolderPath()
     {
@@ -82,6 +84,84 @@ internal static class UserSettings
             else
             {
                 File.WriteAllText(ReplicateTokenFile, token);
+            }
+        }
+        catch
+        {
+            // Ignore persistence errors.
+        }
+    }
+
+    public static string? LoadOpenAiApiKey()
+    {
+        try
+        {
+            if (!File.Exists(OpenAiApiKeyFile))
+            {
+                return null;
+            }
+
+            var content = File.ReadAllText(OpenAiApiKeyFile).Trim();
+            return string.IsNullOrEmpty(content) ? null : content;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public static void SaveOpenAiApiKey(string? apiKey)
+    {
+        try
+        {
+            Directory.CreateDirectory(SettingsFolder);
+
+            if (string.IsNullOrWhiteSpace(apiKey))
+            {
+                File.WriteAllText(OpenAiApiKeyFile, string.Empty);
+            }
+            else
+            {
+                File.WriteAllText(OpenAiApiKeyFile, apiKey);
+            }
+        }
+        catch
+        {
+            // Ignore persistence errors.
+        }
+    }
+
+    public static string? LoadGptPrompt()
+    {
+        try
+        {
+            if (!File.Exists(GptPromptFile))
+            {
+                return null;
+            }
+
+            var content = File.ReadAllText(GptPromptFile).Trim();
+            return string.IsNullOrEmpty(content) ? null : content;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public static void SaveGptPrompt(string? prompt)
+    {
+        try
+        {
+            Directory.CreateDirectory(SettingsFolder);
+
+            if (string.IsNullOrWhiteSpace(prompt))
+            {
+                File.WriteAllText(GptPromptFile, string.Empty);
+            }
+            else
+            {
+                File.WriteAllText(GptPromptFile, prompt);
             }
         }
         catch

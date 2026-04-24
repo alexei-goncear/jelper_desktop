@@ -28,7 +28,9 @@ public partial class MainWindow : Window, ILogSink
     private static readonly string[] PythonExecutableCandidates = { "python", "python3", "py" };
     private const string PythonDownloadUrl = "https://www.python.org/downloads/";
     private const string RecraftCliRelativePath = "Replicate/recraft_cli.py";
+    private const string GptImageCliRelativePath = "Replicate/gpt_image_cli.py";
     private const string ReplicateTokenEnvVar = "REPLICATE_API_TOKEN";
+    private const string OpenAiApiKeyEnvVar = "OPENAI_API_KEY";
     private readonly ImageOperations _operations;
     private readonly List<ConversionOption> _conversionOptions = new()
     {
@@ -67,6 +69,7 @@ public partial class MainWindow : Window, ILogSink
         _operationViews = new Dictionary<OperationPanel, UIElement>
         {
             { OperationPanel.RecraftUpscale, RecraftUpscaleForm },
+            { OperationPanel.GptImageEdit, GptImageEditForm },
             { OperationPanel.Convert, ConvertForm },
             { OperationPanel.Trim, TrimForm },
             { OperationPanel.Resize, ResizeForm },
@@ -81,6 +84,18 @@ public partial class MainWindow : Window, ILogSink
         if (!string.IsNullOrWhiteSpace(savedToken))
         {
             ReplicateTokenBox.Password = savedToken;
+        }
+
+        var savedOpenAiApiKey = UserSettings.LoadOpenAiApiKey();
+        if (!string.IsNullOrWhiteSpace(savedOpenAiApiKey))
+        {
+            OpenAiApiKeyBox.Password = savedOpenAiApiKey;
+        }
+
+        var savedGptPrompt = UserSettings.LoadGptPrompt();
+        if (!string.IsNullOrWhiteSpace(savedGptPrompt))
+        {
+            GptPromptTextBox.Text = savedGptPrompt;
         }
 
         var savedPath = UserSettings.LoadImagesFolderPath();
@@ -221,6 +236,63 @@ public partial class MainWindow : Window, ILogSink
             ctx => _operations.UpscaleWithRecraftAsync(files, ctx, options));
     }
 
+    private async void GptImageEditButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (!EnsureImagesFolderSelected() ||
+            !TryGetFiles(OperationPanel.GptImageEdit, out var files) ||
+            !ConfirmOperationCount(files.Count))
+        {
+            return;
+        }
+
+        var apiKey = GetOpenAiApiKey();
+        if (apiKey == null)
+        {
+            WpfMessageBox.Show(this, "Введите API key OpenAI, чтобы продолжить.", "API key не указан", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var prompt = GetGptPrompt();
+        if (prompt == null)
+        {
+            WpfMessageBox.Show(this, "Введите общий промпт для всех изображений.", "Промпт не указан", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        Environment.SetEnvironmentVariable(OpenAiApiKeyEnvVar, apiKey, EnvironmentVariableTarget.Process);
+
+        if (!TryFindPythonRuntime(out var pythonRuntime))
+        {
+            ShowPythonMissingMessage();
+            return;
+        }
+
+        if (!TryResolvePythonCli(GptImageCliRelativePath, out var scriptPath))
+        {
+            const string title = "Скрипт не найден";
+            const string message = "Файл Replicate/gpt_image_cli.py не найден рядом с приложением. Проверьте, что он скопирован вместе с программой.";
+            AppendLog(message, isError: true);
+            WpfMessageBox.Show(this, message, title, MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
+
+        UserSettings.SaveOpenAiApiKey(apiKey);
+        UserSettings.SaveGptPrompt(prompt);
+
+        var options = new GptImageEditOptions
+        {
+            PythonExecutablePath = pythonRuntime.Executable,
+            PythonVersionDescription = pythonRuntime.VersionText,
+            ScriptPath = scriptPath,
+            ApiKey = apiKey,
+            Prompt = prompt
+        };
+
+        await RunOperationAsync("GPT image edit in progress...",
+            files,
+            ctx => _operations.EditWithGptAsync(files, ctx, options));
+    }
+
     private void BrowseFolderButton_OnClick(object sender, RoutedEventArgs e)
     {
         BrowseForFolder();
@@ -349,6 +421,7 @@ public partial class MainWindow : Window, ILogSink
     {
         OperationPanel.Convert => "Конвертация",
         OperationPanel.RecraftUpscale => "Recraft Upscale",
+        OperationPanel.GptImageEdit => "GPT",
         OperationPanel.Trim => "Удаление водяного знака",
         OperationPanel.Resize => "Изменение размера",
         OperationPanel.Watermark => "Размер + водяной знак",
@@ -409,6 +482,7 @@ public partial class MainWindow : Window, ILogSink
         files = panel switch
         {
             OperationPanel.RecraftUpscale => _operations.ListSupportedImageFiles(),
+            OperationPanel.GptImageEdit => _operations.ListSupportedImageFiles(),
             OperationPanel.Trim => _operations.ListSupportedImageFiles(),
             OperationPanel.Resize => _operations.ListSupportedImageFiles(),
             OperationPanel.Watermark => _operations.ListSupportedImageFiles(),
@@ -890,9 +964,24 @@ public partial class MainWindow : Window, ILogSink
     }
 
     private bool TryResolveRecraftCli(out string scriptPath)
+        => TryResolvePythonCli(RecraftCliRelativePath, out scriptPath);
+
+    private string? GetOpenAiApiKey()
+    {
+        var value = OpenAiApiKeyBox.Password?.Trim();
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    private string? GetGptPrompt()
+    {
+        var value = GptPromptTextBox.Text?.Trim();
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    private bool TryResolvePythonCli(string relativePath, out string scriptPath)
     {
         var baseDirectory = AppContext.BaseDirectory;
-        var candidate = Path.Combine(baseDirectory, RecraftCliRelativePath);
+        var candidate = Path.Combine(baseDirectory, relativePath);
         if (File.Exists(candidate))
         {
             scriptPath = candidate;
@@ -1097,6 +1186,7 @@ public partial class MainWindow : Window, ILogSink
     {
         None,
         RecraftUpscale,
+        GptImageEdit,
         Convert,
         Trim,
         Resize,

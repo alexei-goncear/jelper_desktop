@@ -122,11 +122,17 @@
             </Border>
 
             <Border Grid.Row="2" Background="{StaticResource CardBrush}" CornerRadius="10" Padding="16" Margin="0,20,0,0" BorderBrush="{StaticResource BorderBrushColor}" BorderThickness="1">
-                <UniformGrid x:Name="ActionsPanel" Columns="5" Rows="1" Margin="0,4,0,0">
+                <UniformGrid x:Name="ActionsPanel" Columns="6" Rows="1" Margin="0,4,0,0">
                     <Button Style="{StaticResource IconActionButtonStyle}" Tag="RecraftUpscale" Click="ActionShortcut_OnClick" ToolTip="Улучшить качество через Recraft API">
                         <StackPanel>
                             <TextBlock Text="&#xE777;" FontFamily="Segoe MDL2 Assets" FontSize="32" HorizontalAlignment="Center" />
                             <TextBlock Text="Recraft Upscale" TextAlignment="Center" Margin="0,6,0,0" />
+                        </StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource IconActionButtonStyle}" Tag="GptImageEdit" Click="ActionShortcut_OnClick" ToolTip="Применить общий промпт ко всем PNG/JPG через ChatGPT API">
+                        <StackPanel>
+                            <TextBlock Text="&#xE8A5;" FontFamily="Segoe MDL2 Assets" FontSize="32" HorizontalAlignment="Center" />
+                            <TextBlock Text="GPT" TextAlignment="Center" Margin="0,6,0,0" />
                         </StackPanel>
                     </Button>
                     <Button Style="{StaticResource IconActionButtonStyle}" Tag="Convert" Click="ActionShortcut_OnClick" ToolTip="Конвертация WEBP в PNG">
@@ -185,6 +191,32 @@
                                     <Run Text="." />
                                 </TextBlock>
                                 <Button Content="Запустить Recraft Upscale" Height="40" Margin="0,16,0,0" Click="RecraftUpscaleButton_OnClick" />
+                            </StackPanel>
+                        </Grid>
+
+                        <Grid x:Name="GptImageEditForm" Visibility="Collapsed">
+                            <StackPanel>
+                                <TextBlock Text="Пакетное редактирование всех PNG/JPG через ChatGPT Images API с одним общим промптом." TextWrapping="Wrap" Foreground="#B0B4C1" />
+                                <TextBlock Text="Введите API key OpenAI (OPENAI_API_KEY)." Margin="0,12,0,0" />
+                                <PasswordBox x:Name="OpenAiApiKeyBox"
+                                             Margin="0,6,0,0"
+                                             ToolTip="OpenAI API key"
+                                             HorizontalAlignment="Left"
+                                             Width="320" />
+                                <TextBlock Text="Промпт для всех выбранных изображений" Margin="0,12,0,0" />
+                                <TextBox x:Name="GptPromptTextBox"
+                                         Margin="0,6,0,0"
+                                         MinHeight="120"
+                                         AcceptsReturn="True"
+                                         TextWrapping="Wrap"
+                                         VerticalScrollBarVisibility="Auto" />
+                                <TextBlock Margin="0,10,0,0" Foreground="#B0B4C1" TextWrapping="Wrap">
+                                    <Run Text="Для работы нужен Python 3.10+. Если он не установлен, скачайте его с " />
+                                    <Hyperlink NavigateUri="https://www.python.org/downloads/"
+                                               RequestNavigate="Hyperlink_OnRequestNavigate">python.org</Hyperlink>
+                                    <Run Text="." />
+                                </TextBlock>
+                                <Button Content="Запустить GPT" Height="40" Margin="0,16,0,0" Click="GptImageEditButton_OnClick" />
                             </StackPanel>
                         </Grid>
 

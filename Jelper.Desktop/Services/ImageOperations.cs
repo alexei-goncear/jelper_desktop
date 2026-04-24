@@ -16,6 +16,7 @@ internal sealed class ImageOperations
     private static readonly string[] SupportedImagePatterns = { "*.png", "*.jpg", "*.jpeg" };
     private const string RecraftDefaultUpscaleMode = "upscale16mp";
     private const string ReplicateApiTokenEnvVar = "REPLICATE_API_TOKEN";
+    private const string OpenAiApiKeyEnvVar = "OPENAI_API_KEY";
     private readonly ILogSink _log;
     private readonly Func<string> _imagesDirectoryProvider;
 
@@ -375,6 +376,100 @@ internal sealed class ImageOperations
         _log.Info("Recraft Upscale finished for all PNG/JPG files.");
     }
 
+    public async Task EditWithGptAsync(IReadOnlyList<string> files, ImageOperationExecutionContext context, GptImageEditOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(options);
+
+        if (files.Count == 0)
+        {
+            _log.Info("No PNG/JPG files were found in the selected images folder.");
+            return;
+        }
+
+        var pythonExecutable = options.PythonExecutablePath?.Trim();
+        if (string.IsNullOrWhiteSpace(pythonExecutable))
+        {
+            _log.Error("Python executable path was not provided.");
+            return;
+        }
+
+        var scriptPath = options.ScriptPath?.Trim();
+        if (string.IsNullOrWhiteSpace(scriptPath) || !File.Exists(scriptPath))
+        {
+            _log.Error("Python CLI script was not found. GPT image edit cannot run.");
+            return;
+        }
+
+        var apiKey = options.ApiKey?.Trim();
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            _log.Error($"Environment variable {OpenAiApiKeyEnvVar} is not set. GPT image edit cannot run.");
+            return;
+        }
+
+        var prompt = options.Prompt?.Trim();
+        if (string.IsNullOrWhiteSpace(prompt))
+        {
+            _log.Error("Prompt was not provided. GPT image edit cannot run.");
+            return;
+        }
+
+        var pythonInfo = !string.IsNullOrWhiteSpace(options.PythonVersionDescription)
+            ? options.PythonVersionDescription!
+            : pythonExecutable;
+        _log.Info($"Python runtime: {pythonInfo}");
+        _log.Info($"Python CLI script: {scriptPath}");
+
+        var total = files.Count;
+        _log.Info($"Found {total} PNG/JPG file(s). Editing via GPT image API...");
+
+        for (var index = 0; index < total; index++)
+        {
+            context.CancellationToken.ThrowIfCancellationRequested();
+            var file = files[index];
+            var progress = FormatProgress(index + 1, total);
+            var fileName = Path.GetFileName(file);
+            var outputPath = GetGptOutputPath(file);
+
+            ReportProgress(context, file, FileProcessingState.Started, total);
+
+            try
+            {
+                var result = await RunPythonGptEditAsync(file, outputPath, options, context.CancellationToken);
+                var producedPath = result.OutputPath;
+
+                if (!File.Exists(producedPath))
+                {
+                    throw new InvalidOperationException("Python CLI did not produce an output file.");
+                }
+
+                var finalPath = GetGptFinalPath(file);
+                if (!producedPath.Equals(finalPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    File.Move(producedPath, finalPath, true);
+                    producedPath = finalPath;
+                }
+
+                var extra = string.IsNullOrWhiteSpace(result.Message) ? string.Empty : $" ({result.Message})";
+                _log.Info($"{progress} Updated via GPT image API{extra}. New file: {producedPath}");
+                ReportProgress(context, file, FileProcessingState.Completed, total);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"{progress} Failed to edit {fileName}: {ex.Message}");
+                ReportProgress(context, file, FileProcessingState.Failed, total, ex.Message);
+            }
+        }
+
+        _log.Info("GPT image edit finished for all PNG/JPG files.");
+    }
+
     private async Task<PythonCliResult> RunPythonUpscaleAsync(string inputPath, string outputPath, string token, RecraftUpscaleOptions options, CancellationToken cancellationToken)
     {
         var startInfo = new ProcessStartInfo
@@ -397,6 +492,70 @@ internal sealed class ImageOperations
         startInfo.ArgumentList.Add(mode);
 
         startInfo.Environment[ReplicateApiTokenEnvVar] = token;
+
+        using var process = new Process { StartInfo = startInfo };
+        if (!process.Start())
+        {
+            throw new InvalidOperationException("Failed to start Python CLI process.");
+        }
+
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
+
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+
+            throw;
+        }
+
+        var stdout = await stdoutTask;
+        var stderr = await stderrTask;
+
+        if (process.ExitCode != 0)
+        {
+            var message = string.IsNullOrWhiteSpace(stderr) ? stdout : stderr;
+            throw new InvalidOperationException($"Python CLI exited with code {process.ExitCode}: {message?.Trim()}");
+        }
+
+        var payload = stdout?.Trim();
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            throw new InvalidOperationException("Python CLI did not return any data.");
+        }
+
+        return ParsePythonCliResult(payload);
+    }
+
+    private async Task<PythonCliResult> RunPythonGptEditAsync(string inputPath, string outputPath, GptImageEditOptions options, CancellationToken cancellationToken)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = options.PythonExecutablePath,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WorkingDirectory = Path.GetDirectoryName(options.ScriptPath) ?? Environment.CurrentDirectory
+        };
+        startInfo.ArgumentList.Add(options.ScriptPath);
+        startInfo.ArgumentList.Add("--image");
+        startInfo.ArgumentList.Add(inputPath);
+        startInfo.ArgumentList.Add("--output");
+        startInfo.ArgumentList.Add(outputPath);
+        startInfo.ArgumentList.Add("--prompt");
+        startInfo.ArgumentList.Add(options.Prompt);
+        startInfo.ArgumentList.Add("--model");
+        startInfo.ArgumentList.Add(options.Model);
+
+        startInfo.Environment[OpenAiApiKeyEnvVar] = options.ApiKey;
 
         using var process = new Process { StartInfo = startInfo };
         if (!process.Start())
@@ -489,6 +648,16 @@ internal sealed class ImageOperations
         var fileName = Path.GetFileNameWithoutExtension(sourcePath);
         return Path.Combine(directory, fileName + ".webp");
     }
+
+    private static string GetGptOutputPath(string sourcePath)
+    {
+        var directory = Path.GetDirectoryName(sourcePath) ?? string.Empty;
+        var fileName = Path.GetFileNameWithoutExtension(sourcePath);
+        var extension = Path.GetExtension(sourcePath);
+        return Path.Combine(directory, fileName + ".gpt-temp" + extension);
+    }
+
+    private static string GetGptFinalPath(string sourcePath) => sourcePath;
 
     private static void TryDeleteOriginal(string originalPath, string producedPath)
     {
@@ -619,4 +788,14 @@ internal sealed class RecraftUpscaleOptions
     public required string ApiToken { get; init; }
     public string? PythonVersionDescription { get; init; }
     public string? UpscaleMode { get; init; } = null;
+}
+
+internal sealed class GptImageEditOptions
+{
+    public required string PythonExecutablePath { get; init; }
+    public required string ScriptPath { get; init; }
+    public required string ApiKey { get; init; }
+    public required string Prompt { get; init; }
+    public string? PythonVersionDescription { get; init; }
+    public string Model { get; init; } = "gpt-image-1";
 }

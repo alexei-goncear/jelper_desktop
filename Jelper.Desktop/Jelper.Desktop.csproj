@@ -27,6 +27,10 @@
       <Link>Replicate\recraft_cli.py</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Include="..\Replicate\gpt_image_cli.py">
+      <Link>Replicate\gpt_image_cli.py</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
     <None Include="..\Replicate\requirements.txt">
       <Link>Replicate\requirements.txt</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
