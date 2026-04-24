@@ -689,6 +689,7 @@ public partial class MainWindow : Window, ILogSink
             _operationCancellation = null;
             CancelOperationButton.IsEnabled = false;
             StopEtaTimer();
+            ProgressPanel.Visibility = Visibility.Collapsed;
             SetBusy(false);
 
             if (completedSuccessfully)

@@ -315,20 +315,20 @@
                         </Grid>
                     </Grid>
 
-                    <Border x:Name="ProgressPanel" Background="#11141C" CornerRadius="10" Padding="16" Margin="0,20,0,0" BorderBrush="{StaticResource BorderBrushColor}" BorderThickness="1" Visibility="Collapsed">
+                    <Border x:Name="ProgressPanel_DEPRECATED" Background="#11141C" CornerRadius="10" Padding="16" Margin="0,20,0,0" BorderBrush="{StaticResource BorderBrushColor}" BorderThickness="1" Visibility="Collapsed">
                         <StackPanel>
                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Stretch">
                                 <StackPanel>
                                     <TextBlock Text="Выполнение операции" FontSize="16" FontWeight="Bold" />
-                                    <TextBlock x:Name="CurrentOperationText" Foreground="#B0B4C1" Margin="0,4,0,0" />
+                                    <TextBlock x:Name="CurrentOperationText_DEPRECATED" Foreground="#B0B4C1" Margin="0,4,0,0" />
                                 </StackPanel>
-                                <Button x:Name="CancelOperationButton" Content="Отменить" Margin="20,0,0,0" Width="120" HorizontalAlignment="Right" Click="CancelOperationButton_OnClick" />
+                                <Button x:Name="CancelOperationButton_DEPRECATED" Content="Отменить" Margin="20,0,0,0" Width="120" HorizontalAlignment="Right" Click="CancelOperationButton_OnClick" />
                             </StackPanel>
-                            <TextBlock x:Name="ProgressSummaryText" FontWeight="SemiBold" Margin="0,12,0,0" />
-                            <TextBlock x:Name="EtaText" Foreground="#B0B4C1" Margin="0,4,0,0" />
-                            <ProgressBar x:Name="OverallProgressBar" Height="16" Margin="0,12,0,12" Minimum="0" Maximum="1" />
+                            <TextBlock x:Name="ProgressSummaryText_DEPRECATED" FontWeight="SemiBold" Margin="0,12,0,0" />
+                            <TextBlock x:Name="EtaText_DEPRECATED" Foreground="#B0B4C1" Margin="0,4,0,0" />
+                            <ProgressBar x:Name="OverallProgressBar_DEPRECATED" Height="16" Margin="0,12,0,12" Minimum="0" Maximum="1" />
                             <Border BorderThickness="1" BorderBrush="{StaticResource BorderBrushColor}" CornerRadius="6">
-                                <ListView x:Name="ProcessingFilesList" Background="#0D0F14" BorderThickness="0" Foreground="#F5F5F5" Height="220" ScrollViewer.VerticalScrollBarVisibility="Auto">
+                                <ListView x:Name="ProcessingFilesList_DEPRECATED" Background="#0D0F14" BorderThickness="0" Foreground="#F5F5F5" Height="220" ScrollViewer.VerticalScrollBarVisibility="Auto">
                                     <ListView.Resources>
                                         <Style TargetType="GridViewColumnHeader">
                                             <Setter Property="Background" Value="#0D0F14" />
@@ -402,6 +402,106 @@
                 </StatusBarItem>
             </StatusBar>
         </Grid>
+
+        <Border x:Name="ProgressPanel" Background="#CC0A0D12" Visibility="Collapsed" Panel.ZIndex="20">
+            <Border Background="#11141C"
+                    CornerRadius="12"
+                    Padding="20"
+                    Margin="24"
+                    BorderBrush="{StaticResource BorderBrushColor}"
+                    BorderThickness="1">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Grid Grid.Row="0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel>
+                            <TextBlock Text="Выполнение операции" FontSize="18" FontWeight="Bold" />
+                            <TextBlock x:Name="CurrentOperationText" Foreground="#B0B4C1" Margin="0,4,0,0" />
+                        </StackPanel>
+
+                        <Button x:Name="CancelOperationButton"
+                                Grid.Column="1"
+                                Content="Отменить"
+                                Width="120"
+                                HorizontalAlignment="Right"
+                                Click="CancelOperationButton_OnClick" />
+                    </Grid>
+
+                    <TextBlock Grid.Row="1" x:Name="ProgressSummaryText" FontWeight="SemiBold" Margin="0,16,0,0" />
+                    <TextBlock Grid.Row="1" x:Name="EtaText" Foreground="#B0B4C1" Margin="0,40,0,0" />
+                    <ProgressBar Grid.Row="2" x:Name="OverallProgressBar" Height="16" Margin="0,16,0,16" Minimum="0" Maximum="1" />
+
+                    <Border Grid.Row="3" BorderThickness="1" BorderBrush="{StaticResource BorderBrushColor}" CornerRadius="6">
+                        <ListView x:Name="ProcessingFilesList" Background="#0D0F14" BorderThickness="0" Foreground="#F5F5F5" ScrollViewer.VerticalScrollBarVisibility="Auto">
+                            <ListView.Resources>
+                                <Style TargetType="GridViewColumnHeader">
+                                    <Setter Property="Background" Value="#0D0F14" />
+                                    <Setter Property="Foreground" Value="#F5F5F5" />
+                                    <Setter Property="Padding" Value="8,4" />
+                                    <Setter Property="FontWeight" Value="SemiBold" />
+                                    <Setter Property="BorderBrush" Value="#2A2F3A" />
+                                    <Setter Property="BorderThickness" Value="0,0,0,1" />
+                                </Style>
+                            </ListView.Resources>
+                            <ListView.ItemContainerStyle>
+                                <Style TargetType="ListViewItem">
+                                    <Setter Property="Background" Value="#0D0F14" />
+                                    <Setter Property="Foreground" Value="#F5F5F5" />
+                                    <Setter Property="BorderThickness" Value="0,0,0,1" />
+                                    <Setter Property="BorderBrush" Value="#1F232C" />
+                                    <Setter Property="Padding" Value="8,4" />
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                    <Style.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter Property="Background" Value="#151922" />
+                                        </Trigger>
+                                        <Trigger Property="IsSelected" Value="True">
+                                            <Setter Property="Background" Value="#1E2735" />
+                                            <Setter Property="BorderBrush" Value="#3EA6FF" />
+                                        </Trigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </ListView.ItemContainerStyle>
+                            <ListView.View>
+                                <GridView>
+                                    <GridViewColumn Header="Файл" Width="360">
+                                        <GridViewColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding FileName}" />
+                                            </DataTemplate>
+                                        </GridViewColumn.CellTemplate>
+                                    </GridViewColumn>
+                                    <GridViewColumn Header="Статус" Width="160">
+                                        <GridViewColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding StatusText}" Foreground="{Binding StatusBrush}" FontWeight="SemiBold" />
+                                            </DataTemplate>
+                                        </GridViewColumn.CellTemplate>
+                                    </GridViewColumn>
+                                    <GridViewColumn Header="Ошибка" Width="320">
+                                        <GridViewColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding ErrorMessage}" Foreground="#F45B69" TextWrapping="Wrap" />
+                                            </DataTemplate>
+                                        </GridViewColumn.CellTemplate>
+                                    </GridViewColumn>
+                                </GridView>
+                            </ListView.View>
+                        </ListView>
+                    </Border>
+                </Grid>
+            </Border>
+        </Border>
 
         <Border x:Name="LogsOverlay" Background="#AA000000" Visibility="Collapsed">
             <Border Background="#141821" CornerRadius="12" Padding="16" Width="600" Height="380" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,40,40,0" BorderBrush="{StaticResource BorderBrushColor}" BorderThickness="1">
